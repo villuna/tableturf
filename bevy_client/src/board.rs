@@ -1,6 +1,7 @@
-use crate::Player;
-use crate::cursor::*;
 use crate::cards::*;
+use crate::game::CurrentPlayer;
+use crate::utils::cursor::*;
+use crate::Player;
 use bevy::prelude::*;
 use bevy::utils::HashMap;
 
@@ -80,7 +81,11 @@ fn update_tiles_event(
         // any highlighted squares that *were* there stay there.
         if let Some((card, coord)) = card.zip(coord) {
             for (mut sprite, tile) in tiles.iter_mut() {
-                if card.tiles.iter().any(|(ctile, _)| (ctile.0 + coord.0, ctile.1 + coord.1) == tile.coord) {
+                if card
+                    .tiles
+                    .iter()
+                    .any(|(ctile, _)| (ctile.0 + coord.0, ctile.1 + coord.1) == tile.coord)
+                {
                     sprite.color = Color::WHITE;
                 } else {
                     let tile = board.board.get(&tile.coord).unwrap();
@@ -106,6 +111,7 @@ struct Tile {
 }
 
 fn create_board(mut cmd: Commands) {
+    cmd.insert_resource(CurrentPlayer(Player::P1));
     let board = Board::new();
 
     for (&coord, tile) in board.board.iter() {
@@ -139,8 +145,7 @@ fn create_board(mut cmd: Commands) {
 
 impl Plugin for BoardPlugin {
     fn build(&self, app: &mut App) {
-        app
-            .add_event::<UpdateTiles>()
+        app.add_event::<UpdateTiles>()
             .add_systems(Startup, (create_board, create_hover))
             .add_systems(Update, toggle_hover)
             .add_systems(Update, mouse_over_tile.after(toggle_hover))
@@ -159,15 +164,20 @@ fn tile_colour(tile: Option<&TileData>) -> Color {
         None => Color::rgb(0.2, 0.2, 0.2),
 
         Some(TileData {
-            player: Player::P1, special: false,
+            player: Player::P1,
+            special: false,
         }) => Color::rgb(0.7, 0.8, 0.2),
         Some(TileData {
-            player: Player::P1, special: true,
+            player: Player::P1,
+            special: true,
         }) => Color::rgb(0.8, 0.5, 0.2),
 
         Some(TileData {
-            player: Player::P2, ..
+            player: Player::P2, special: false,
         }) => Color::rgb(0.22, 0.29, 0.93),
+        Some(TileData {
+            player: Player::P2, special: true,
+        }) => Color::rgb(0.2, 0.9, 0.93),
     }
 }
 
