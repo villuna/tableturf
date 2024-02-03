@@ -1,13 +1,25 @@
 use crate::cards::*;
-use crate::game::CurrentPlayer;
 use crate::utils::cursor::*;
 use crate::Player;
 use bevy::prelude::*;
 use bevy::utils::HashMap;
 
 const TILE_SIZE: f32 = 32.;
-pub type Coord = (i32, i32);
 
+// Wrapper for an unsigned integer 2d coordinate that I can use for the board
+#[derive(Eq, PartialEq, Copy, Clone, Debug, Hash)]
+pub struct Coord(pub i32, pub i32);
+
+impl std::ops::Add for Coord {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Coord(self.0 + rhs.0, self.1 + rhs.1)
+    }
+}
+
+// Converts from a position in world space to the tile on the board that overlaps this position,
+// if it is on any of the tiles.
 fn world_to_board(dimensions: (i32, i32), position: Vec2) -> Option<Coord> {
     let w = TILE_SIZE + 1.;
     let hw = w / 2.0;
@@ -21,9 +33,11 @@ fn world_to_board(dimensions: (i32, i32), position: Vec2) -> Option<Coord> {
     let x = centred_x + offset_x;
     let y = centred_y + offset_y;
 
-    (x >= 0 && x < dimensions.0 && y >= 0 && y <= dimensions.1).then_some((x, y))
+    (x >= 0 && x < dimensions.0 && y >= 0 && y <= dimensions.1).then_some(Coord(x, y))
 }
 
+// Converts from the coordinate of a tile on the board to the position in screen space where that
+// tile should be placed (i.e., the centre of the tile)
 fn board_to_world(dimensions: (i32, i32), position: Coord) -> Vec2 {
     let base_x = -((dimensions.0 as f32 - 1.) * (TILE_SIZE + 1.)) / 2.;
     let base_y = -((dimensions.1 as f32 - 1.) * (TILE_SIZE + 1.)) / 2.;
@@ -37,7 +51,7 @@ fn board_to_world(dimensions: (i32, i32), position: Coord) -> Vec2 {
 #[derive(Resource)]
 pub struct CursorCoord(pub Option<Coord>);
 
-fn mouse_over_tile(
+pub fn mouse_over_tile(
     // for calculating board coordinates
     board: Res<Board>,
     cursor_pos: Res<CursorPosition>,
@@ -63,7 +77,7 @@ fn mouse_over_tile(
 #[derive(Event)]
 pub struct UpdateTiles;
 
-fn update_tiles_event(
+pub fn update_tiles_event(
     board: Res<Board>,
     mut er: EventReader<UpdateTiles>,
     // for changing the colour of tiles
@@ -84,7 +98,7 @@ fn update_tiles_event(
                 if card
                     .tiles
                     .iter()
-                    .any(|(ctile, _)| (ctile.0 + coord.0, ctile.1 + coord.1) == tile.coord)
+                    .any(|(ctile, _)| Coord(ctile.0 + coord.0, ctile.1 + coord.1) == tile.coord)
                 {
                     sprite.color = Color::WHITE;
                 } else {
@@ -103,15 +117,12 @@ fn update_tiles_event(
     }
 }
 
-pub struct BoardPlugin;
-
 #[derive(Component)]
-struct Tile {
+pub struct Tile {
     coord: Coord,
 }
 
-fn create_board(mut cmd: Commands) {
-    cmd.insert_resource(CurrentPlayer(Player::P1));
+pub fn create_board(mut cmd: Commands) {
     let board = Board::new();
 
     for (&coord, tile) in board.board.iter() {
@@ -141,17 +152,6 @@ fn create_board(mut cmd: Commands) {
     }
 
     cmd.insert_resource(board);
-}
-
-impl Plugin for BoardPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_event::<UpdateTiles>()
-            .add_systems(Startup, (create_board, create_hover))
-            .add_systems(Update, toggle_hover)
-            .add_systems(Update, mouse_over_tile.after(toggle_hover))
-            .add_systems(Update, place_card.after(mouse_over_tile))
-            .add_systems(Update, update_tiles_event.after(place_card));
-    }
 }
 
 pub struct TileData {
@@ -209,7 +209,7 @@ impl Board {
                     None
                 };
 
-                board.insert((x, y), tile);
+                board.insert(Coord(x, y), tile);
             }
         }
 

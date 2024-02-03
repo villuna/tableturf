@@ -1,22 +1,54 @@
 use crate::{
     board::{Board, Coord, CursorCoord, TileData, UpdateTiles},
-    Player, game::CurrentPlayer,
+    Player, game::MoveMade,
 };
 use bevy::prelude::*;
+
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+pub enum Rotation {
+    Up,
+    Right,
+    Down,
+    Left,
+}
+
+const ROTATIONS: [Rotation; 4] = [
+    Rotation::Up,
+    Rotation::Right,
+    Rotation::Down,
+    Rotation::Left,
+];
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct CardData {
     pub tiles: &'static [(Coord, bool)],
+    pub special_cost: usize,
+}
+
+pub(crate) fn rotate_card(card: &CardData, rotation: Rotation) -> Vec<(Coord, bool)> {
+    let transformation: fn(Coord) -> Coord = match rotation {
+        Rotation::Up => |coord| coord,
+        Rotation::Right => |Coord(x, y)| Coord(y, -x),
+        Rotation::Down => |Coord(x, y)| Coord(-x, -y),
+        Rotation::Left => |Coord(x, y)| Coord(-y, x),
+    };
+
+    card.tiles
+        .iter()
+        .cloned()
+        .map(|(c, s)| (transformation(c), s))
+        .collect::<Vec<_>>()
 }
 
 #[rustfmt::skip]
 pub static HERO_SHOT: CardData = CardData {
     tiles: &[
-        ((-2, 1), false), ((-1, 1), false), (( 0, 1), false), (( 1, 1), false), (( 2, 1), false),
-        ((-2, 0), false), ((-1, 0), false), (( 0, 0), false), (( 1, 0),  true), (( 2, 0), false),
-                          ((-1,-1), false),
-        ((-2,-2), false),
+        (Coord(-2, 1), false), (Coord(-1, 1), false), (Coord( 0, 1), false), (Coord( 1, 1), false), (Coord( 2, 1), false),
+        (Coord(-2, 0), false), (Coord(-1, 0), false), (Coord( 0, 0), false), (Coord( 1, 0),  true), (Coord( 2, 0), false),
+                          (Coord(-1,-1), false),
+        (Coord(-2,-2), false),
     ],
+    special_cost: 5,
 };
 
 #[derive(Resource)]
@@ -42,23 +74,35 @@ pub fn toggle_hover(
     }
 }
 
-fn is_placeable(player: Player, card: &CardData, position: Coord, board: &Board) -> bool {
-    let no_obstructions = card.tiles.iter().all(|(tile_pos, _)| {
+fn is_placeable(
+    board: &Board,
+    player: Player,
+    card: &CardData,
+    rotation: Rotation,
+    position: Coord,
+    special: bool,
+) -> bool {
+    let card = rotate_card(card, rotation);
+
+    let no_obstructions = card.iter().all(|(tile_pos, _)| {
         board
             .board
-            .get(&(tile_pos.0 + position.0, tile_pos.1 + position.1))
-            .is_some_and(|t| t.is_none())
+            .get(&(*tile_pos + position))
+            .is_some_and(|t| t.is_none() || special && t.as_ref().is_some_and(|td| !td.special))
     });
 
-    let any_adjacent = card.tiles.iter().any(|(tile_pos, _)| {
+    let any_adjacent = card.iter().any(|(tile_pos, _)| {
         for dx in -1..=1 {
             for dy in -1..=1 {
                 if dx == 0 && dy == 0 {
                     continue;
                 }
 
-                if board.board.get(&(tile_pos.0 + position.0 + dx, tile_pos.1 + position.1 + dy))
-                    .is_some_and(|t| t.as_ref().is_some_and(|t| t.player == player)) {
+                if board
+                    .board
+                    .get(&(*tile_pos + position + Coord(dx, dy)))
+                    .is_some_and(|t| t.as_ref().is_some_and(|t| t.player == player))
+                {
                     return true;
                 }
             }
@@ -70,30 +114,59 @@ fn is_placeable(player: Player, card: &CardData, position: Coord, board: &Board)
     no_obstructions && any_adjacent
 }
 
+pub fn possible_card_placements(
+    board: &Board,
+    player: Player,
+    card: &CardData,
+    special_points: usize,
+) -> Vec<(Coord, Rotation, bool)> {
+    let mut moves = vec![];
+    let can_special = card.special_cost <= special_points;
+
+    for (pos, _) in board.board.iter() {
+        for rotation in ROTATIONS {
+            if can_special {
+                if is_placeable(board, player, card, rotation, *pos, true) {
+                    moves.push((*pos, rotation, true));
+                } else {
+                    // If it's not placeable as a special, it's not placeable as a normal
+                    continue;
+                }
+            }
+
+            if is_placeable(board, player, card, rotation, *pos, false) {
+                moves.push((*pos, rotation, false));
+            }
+        }
+    }
+
+    moves
+}
+
 pub fn place_card(
     input: Res<Input<MouseButton>>,
     cursor_coord: Res<CursorCoord>,
-    mut current_player: ResMut<CurrentPlayer>,
     mut selected_card: ResMut<SelectedCard>,
     mut board: ResMut<Board>,
-    mut ew: EventWriter<UpdateTiles>,
+    mut update_tiles: EventWriter<UpdateTiles>,
+    mut play_move: EventWriter<MoveMade>,
 ) {
     if let Some((card, coord)) = selected_card.0.as_mut().zip(cursor_coord.0) {
         if input.just_pressed(MouseButton::Left) {
-            if is_placeable(current_player.0, card, coord, &board) {
+            if is_placeable(&board, Player::P1, card, Rotation::Up, coord, false) {
                 for (tile_pos, special) in card.tiles {
                     *board
                         .board
-                        .get_mut(&(tile_pos.0 + coord.0, tile_pos.1 + coord.1))
+                        .get_mut(&Coord(tile_pos.0 + coord.0, tile_pos.1 + coord.1))
                         .unwrap() = Some(TileData {
                         special: *special,
-                        player: current_player.0,
+                        player: Player::P1,
                     });
                 }
 
                 selected_card.0 = None;
-                current_player.0 = current_player.0.other_player();
-                ew.send(UpdateTiles);
+                update_tiles.send(UpdateTiles);
+                play_move.send(MoveMade);
             }
         }
     }
