@@ -49,13 +49,18 @@ impl Opponent {
 
             Move::Play { card_id, special, .. } => {
                 if special {
-                    self.special_points -= self.deck[self.hand[card_id]].special_cost;
+                    let cost = self.deck[self.hand[card_id]].special_cost;
+
+                    if self.special_points >= cost {
+                        self.special_points -= cost;
+                    } else {
+                        panic!("ai cant play special as it doesnt have enough points");
+                    }
                 }
                 card_id
             }
         };
 
-        self.special_points += 1;
         self.discard.push(self.hand[removed]);
 
         let drawn = (0..15)

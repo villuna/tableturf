@@ -105,14 +105,14 @@ pub fn update_tiles_event(
                     sprite.color = Color::WHITE;
                 } else {
                     let tile = board.board.get(&tile.coord).unwrap();
-                    sprite.color = tile_colour(tile.as_ref());
+                    sprite.color = tile_colour(tile);
                 }
             }
         } else if card == None {
             // Clear everything
             for (mut sprite, tile) in tiles.iter_mut() {
                 let tile = board.board.get(&tile.coord).unwrap();
-                sprite.color = tile_colour(tile.as_ref());
+                sprite.color = tile_colour(tile);
             }
         }
         er.clear();
@@ -128,7 +128,7 @@ pub fn create_board(mut cmd: Commands) {
     let board = Board::new();
 
     for (&coord, tile) in board.board.iter() {
-        let color = tile_colour(tile.as_ref());
+        let color = tile_colour(tile);
         let pos = board_to_world(board.dimensions, coord).extend(0.);
 
         cmd.spawn(SpriteBundle {
@@ -156,36 +156,43 @@ pub fn create_board(mut cmd: Commands) {
     cmd.insert_resource(board);
 }
 
-pub struct TileData {
-    pub special: bool,
-    pub player: Player,
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum TileData {
+    Empty,
+    Wall,
+    PlayerSquare {
+        player: Player, 
+        special: bool
+    },
 }
 
-fn tile_colour(tile: Option<&TileData>) -> Color {
+fn tile_colour(tile: &TileData) -> Color {
     match tile {
-        None => Color::rgb(0.2, 0.2, 0.2),
+        TileData::Empty => Color::rgb(0.2, 0.2, 0.2),
 
-        Some(TileData {
+        TileData::Wall => Color::rgb(0.7, 0.7, 0.7),
+
+        TileData::PlayerSquare {
             player: Player::P1,
             special: false,
-        }) => Color::rgb(0.7, 0.8, 0.2),
-        Some(TileData {
+        } => Color::rgb(0.7, 0.8, 0.2),
+        TileData::PlayerSquare {
             player: Player::P1,
             special: true,
-        }) => Color::rgb(0.8, 0.5, 0.2),
+        } => Color::rgb(0.8, 0.5, 0.2),
 
-        Some(TileData {
+        TileData::PlayerSquare {
             player: Player::P2, special: false,
-        }) => Color::rgb(0.22, 0.29, 0.93),
-        Some(TileData {
+        } => Color::rgb(0.22, 0.29, 0.93),
+        TileData::PlayerSquare {
             player: Player::P2, special: true,
-        }) => Color::rgb(0.2, 0.9, 0.93),
+        } => Color::rgb(0.2, 0.9, 0.93),
     }
 }
 
 #[derive(Resource)]
 pub struct Board {
-    pub board: HashMap<Coord, Option<TileData>>,
+    pub board: HashMap<Coord, TileData>,
     pub dimensions: (i32, i32),
 }
 
@@ -198,17 +205,17 @@ impl Board {
         for x in 0..dimensions.0 {
             for y in 0..dimensions.1 {
                 let tile = if x == 8 && y == 5 {
-                    Some(TileData {
+                    TileData::PlayerSquare {
                         special: true,
                         player: Player::P1,
-                    })
+                    }
                 } else if x == 8 && y == dimensions.1 - 4 {
-                    Some(TileData {
+                    TileData::PlayerSquare {
                         special: true,
                         player: Player::P2,
-                    })
+                    }
                 } else {
-                    None
+                    TileData::Empty
                 };
 
                 board.insert(Coord(x, y), tile);
