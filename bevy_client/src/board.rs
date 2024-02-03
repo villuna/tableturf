@@ -1,4 +1,5 @@
 use crate::cards::*;
+use crate::game::PlayerRotation;
 use crate::utils::cursor::*;
 use crate::Player;
 use bevy::prelude::*;
@@ -84,6 +85,7 @@ pub fn update_tiles_event(
     mut tiles: Query<(&mut Sprite, &Tile)>,
     hovering_card: Res<SelectedCard>,
     cursor_coord: Res<CursorCoord>,
+    rotation: Res<PlayerRotation>,
 ) {
     let card = hovering_card.0.as_ref();
     let coord = cursor_coord.0;
@@ -94,9 +96,9 @@ pub fn update_tiles_event(
         // If there *is* a card selected but the cursor is not on the board, we do nothing so that
         // any highlighted squares that *were* there stay there.
         if let Some((card, coord)) = card.zip(coord) {
+            let card = rotate_card(card, rotation.0);
             for (mut sprite, tile) in tiles.iter_mut() {
                 if card
-                    .tiles
                     .iter()
                     .any(|(ctile, _)| Coord(ctile.0 + coord.0, ctile.1 + coord.1) == tile.coord)
                 {

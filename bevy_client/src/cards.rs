@@ -1,6 +1,6 @@
 use crate::{
     board::{Board, Coord, CursorCoord, TileData, UpdateTiles},
-    Player, game::MoveMade,
+    Player, game::{MoveMade, PlayerRotation},
 };
 use bevy::prelude::*;
 
@@ -10,6 +10,17 @@ pub enum Rotation {
     Right,
     Down,
     Left,
+}
+
+impl Rotation {
+    pub(crate) fn rotate_right(&self) -> Rotation {
+        match self {
+            Rotation::Up => Rotation::Right,
+            Rotation::Right => Rotation::Down,
+            Rotation::Down => Rotation::Left,
+            Rotation::Left => Rotation::Up,
+        }
+    }
 }
 
 const ROTATIONS: [Rotation; 4] = [
@@ -63,12 +74,15 @@ pub fn toggle_hover(
     input: Res<Input<MouseButton>>,
     mut ew: EventWriter<UpdateTiles>,
     mut card: ResMut<SelectedCard>,
+    mut rotation: ResMut<PlayerRotation>,
 ) {
     if input.just_pressed(MouseButton::Right) {
         match card.0 {
             None => card.0 = Some(HERO_SHOT),
             Some(_) => card.0 = None,
         }
+
+        rotation.0 = Rotation::Up;
 
         ew.send(UpdateTiles);
     }
@@ -146,6 +160,7 @@ pub fn possible_card_placements(
 pub fn place_card(
     input: Res<Input<MouseButton>>,
     cursor_coord: Res<CursorCoord>,
+    rotation: Res<PlayerRotation>,
     mut selected_card: ResMut<SelectedCard>,
     mut board: ResMut<Board>,
     mut update_tiles: EventWriter<UpdateTiles>,
@@ -153,13 +168,14 @@ pub fn place_card(
 ) {
     if let Some((card, coord)) = selected_card.0.as_mut().zip(cursor_coord.0) {
         if input.just_pressed(MouseButton::Left) {
-            if is_placeable(&board, Player::P1, card, Rotation::Up, coord, false) {
-                for (tile_pos, special) in card.tiles {
+            if is_placeable(&board, Player::P1, card, rotation.0, coord, false) {
+                let card = rotate_card(card, rotation.0);
+                for (tile_pos, special) in card {
                     *board
                         .board
-                        .get_mut(&Coord(tile_pos.0 + coord.0, tile_pos.1 + coord.1))
+                        .get_mut(&(tile_pos + coord))
                         .unwrap() = Some(TileData {
-                        special: *special,
+                        special,
                         player: Player::P1,
                     });
                 }

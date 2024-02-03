@@ -7,7 +7,7 @@ mod ai;
 use bevy::{app::AppExit, prelude::*};
 use board::{UpdateTiles, create_board, mouse_over_tile, update_tiles_event};
 use cards::{create_hover, toggle_hover, place_card};
-use game::{setup_game, opponent_turn, MoveMade};
+use game::{setup_game, opponent_turn, MoveMade, rotate};
 use utils::cursor::*;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -34,8 +34,8 @@ fn main() {
         .add_systems(Startup, startup)
         .add_systems(Update, exit_on_esc_system)
         .add_systems(Startup, (create_board, create_hover, setup_game))
-        .add_systems(Update, toggle_hover)
-        .add_systems(Update, mouse_over_tile.after(toggle_hover))
+        .add_systems(Update, (rotate, toggle_hover))
+        .add_systems(Update, mouse_over_tile.after(toggle_hover).after(rotate))
         .add_systems(Update, place_card.after(mouse_over_tile))
         .add_systems(Update, opponent_turn.after(place_card))
         .add_systems(Update, update_tiles_event.after(opponent_turn))

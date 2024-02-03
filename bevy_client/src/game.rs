@@ -1,7 +1,10 @@
-use crate::{board::{Coord, Board, TileData}, cards::{Rotation, CardData, HERO_SHOT, rotate_card}, ai::{Opponent, RandomMove}, Player};
-use bevy::prelude::*;
+use crate::{board::{Coord, Board, TileData, UpdateTiles}, cards::{Rotation, CardData, HERO_SHOT, rotate_card}, ai::{Opponent, RandomMove}, Player};
+use bevy::{prelude::*, input::keyboard::KeyboardInput};
 
 static TEST_DECK: &[CardData] = &[HERO_SHOT; 15];
+
+#[derive(Resource)]
+pub(crate) struct PlayerRotation(pub(crate) Rotation);
 
 #[derive(Event)]
 pub(crate) struct MoveMade;
@@ -20,6 +23,7 @@ pub(crate) enum Move {
 
 pub(crate) fn setup_game(mut cmd: Commands) {
     cmd.insert_resource(Opponent::new(RandomMove, TEST_DECK));
+    cmd.insert_resource(PlayerRotation(Rotation::Up));
 }
 
 pub(crate) fn opponent_turn(
@@ -43,5 +47,16 @@ pub(crate) fn opponent_turn(
         }
         
         er.clear();
+    }
+}
+
+pub(crate) fn rotate(
+    input: Res<Input<KeyCode>>,
+    mut rotation: ResMut<PlayerRotation>,
+    mut update_tiles: EventWriter<UpdateTiles>,
+) {
+    if input.just_pressed(KeyCode::R) {
+        rotation.0 = rotation.0.rotate_right();
+        update_tiles.send(UpdateTiles);
     }
 }
