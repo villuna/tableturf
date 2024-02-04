@@ -1,86 +1,46 @@
-use rand::{seq::{SliceRandom, IteratorRandom}, Rng};
-use bevy::prelude::*;
-use crate::{board::Board, cards::{CardData, possible_card_placements}, game::Move, Player};
+use std::sync::Arc;
 
-// An AiOpponent implements some algorithm that calculates what the next turn is given the current
-// state of the board and other info
-// Send + Sync is required for it to be a resource
+use rand::{seq::SliceRandom, Rng};
+use bevy::prelude::*;
+use crate::{board::Board, cards::{CardData, possible_card_placements}, game::{Move, ActorState}, Player};
+
+/// An AiOpponent implements some algorithm that calculates what the next turn is given the current
+/// state of the board and other info
+/// Send + Sync is required for it to be a resource
 pub(crate) trait AIOpponent: Send + Sync {
-    // Takes in the board and the opponent's hand and returns which card to play and where.
-    fn next_move(&mut self, board: &Board, hand: &[CardData; 4], special_points: usize) -> Move;
+    /// Considers the board and the state of the opponent and returns which move to play
+    fn next_move(&mut self, board: &Board, state: &ActorState) -> Move;
 }
 
 #[derive(Resource)]
 pub(crate) struct Opponent {
     ai: Box<dyn AIOpponent>,
-    deck: &'static [CardData],
-    discard: Vec<usize>,
-    hand: [usize; 4],
-    special_points: usize,
+    state: ActorState,
 }
 
 impl Opponent {
-    pub(crate) fn new<AI: AIOpponent + 'static>(ai: AI, deck: &'static [CardData]) -> Self {
-        let mut rng = rand::thread_rng();
-        assert_eq!(deck.len(), 15);
-        let hand = (0..15).choose_multiple(&mut rng, 4);
-        assert_eq!(hand.len(), 4);
-        let hand = [hand[0], hand[1], hand[2], hand[3]];
-
+    pub(crate) fn new<AI: AIOpponent + 'static, D: Into<Arc<[CardData]>>>(ai: AI, deck: D) -> Self {
         Self {
             ai: Box::new(ai),
-            deck,
-            discard: Vec::new(),
-            hand,
-            special_points: 0,
+            state: ActorState::new(deck),
         }
     }
 
     pub(crate) fn make_move(&mut self, board: &Board) -> Move {
-        let cards = self.hand.map(|i| self.deck[i]);
-        let move_made = self.ai.next_move(board, &cards, self.special_points);
-        let mut rng = rand::thread_rng();
-
-        let removed = match move_made {
-            Move::Pass(card_id) => {
-                self.special_points += 1;
-                card_id
-            }
-
-            Move::Play { card_id, special, .. } => {
-                if special {
-                    let cost = self.deck[self.hand[card_id]].special_cost;
-
-                    if self.special_points >= cost {
-                        self.special_points -= cost;
-                    } else {
-                        panic!("ai cant play special as it doesnt have enough points");
-                    }
-                }
-                card_id
-            }
-        };
-
-        self.discard.push(self.hand[removed]);
-
-        let drawn = (0..15)
-            .filter(|i| !self.discard.contains(i))
-            .choose(&mut rng)
-            .unwrap();
-
-        self.hand[removed] = drawn;
+        let move_made = self.ai.next_move(board, &self.state);
+        self.state.make_move(&move_made); 
 
         move_made
     }
 
-    pub(crate) fn deck(&self) -> &'static [CardData] { self.deck }
+    pub(crate) fn deck(&self) -> &[CardData] { self.state.deck.as_ref() }
 }
 
-// An opponent that makes moves at "random".
+/// An opponent that makes moves at "random".
 pub(crate) struct RandomMove;
 
 impl AIOpponent for RandomMove {
-    fn next_move(&mut self, board: &Board, hand: &[CardData; 4], special_points: usize) -> Move {
+    fn next_move(&mut self, board: &Board, state: &ActorState) -> Move {
         let mut rng = rand::thread_rng();
 
         // Players sometimes pass even if they *could* play something else so lets add a tiny
@@ -91,11 +51,17 @@ impl AIOpponent for RandomMove {
         }
 
         // Pick a random card that has spaces left, then a random space.
-        let mut order = hand.iter().enumerate().collect::<Vec<_>>();
+        let mut order = state.hand
+            .iter()
+            .cloned()
+            .map(|i| &state.deck[i])
+            .enumerate()
+            .collect::<Vec<_>>();
+
         order.shuffle(&mut rng);
 
         for (index, card) in order {
-            let possible = possible_card_placements(board, Player::P2, card, special_points);
+            let possible = possible_card_placements(board, Player::P2, card, state.special_points);
 
             if let Some((pos, rot, special)) = possible.choose(&mut rng) {
                 return Move::Play {

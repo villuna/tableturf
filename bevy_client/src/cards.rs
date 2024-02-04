@@ -1,8 +1,7 @@
 use crate::{
-    board::{Board, Coord, CursorCoord, UpdateTiles, TileData},
-    Player, game::PlayerRotation,
+    board::{Board, Coord, TileData},
+    Player,
 };
-use bevy::prelude::*;
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum Rotation {
@@ -61,32 +60,6 @@ pub static HERO_SHOT: CardData = CardData {
     ],
     special_cost: 5,
 };
-
-#[derive(Resource)]
-pub struct SelectedCard(pub Option<CardData>);
-
-pub fn create_hover(mut cmd: Commands) {
-    cmd.insert_resource(CursorCoord(None));
-    cmd.insert_resource(SelectedCard(None));
-}
-
-pub fn toggle_hover(
-    input: Res<Input<MouseButton>>,
-    mut ew: EventWriter<UpdateTiles>,
-    mut card: ResMut<SelectedCard>,
-    mut rotation: ResMut<PlayerRotation>,
-) {
-    if input.just_pressed(MouseButton::Right) {
-        match card.0 {
-            None => card.0 = Some(HERO_SHOT),
-            Some(_) => card.0 = None,
-        }
-
-        rotation.0 = Rotation::Up;
-
-        ew.send(UpdateTiles);
-    }
-}
 
 pub(crate) fn is_placeable(
     board: &Board,

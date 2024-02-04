@@ -1,5 +1,5 @@
 use crate::cards::*;
-use crate::game::PlayerRotation;
+use crate::game::PlayerState;
 use crate::utils::cursor::*;
 use crate::Player;
 use bevy::prelude::*;
@@ -83,11 +83,10 @@ pub fn update_tiles_event(
     mut er: EventReader<UpdateTiles>,
     // for changing the colour of tiles
     mut tiles: Query<(&mut Sprite, &Tile)>,
-    hovering_card: Res<SelectedCard>,
     cursor_coord: Res<CursorCoord>,
-    rotation: Res<PlayerRotation>,
+    player_state: Res<PlayerState>,
 ) {
-    let card = hovering_card.0.as_ref();
+    let card = player_state.selected_card.as_ref();
     let coord = cursor_coord.0;
 
     if !er.is_empty() {
@@ -96,7 +95,7 @@ pub fn update_tiles_event(
         // If there *is* a card selected but the cursor is not on the board, we do nothing so that
         // any highlighted squares that *were* there stay there.
         if let Some((card, coord)) = card.zip(coord) {
-            let card = rotate_card(card, rotation.0);
+            let card = rotate_card(&player_state.state.deck[card.card], card.rotation);
             for (mut sprite, tile) in tiles.iter_mut() {
                 if card
                     .iter()
@@ -105,14 +104,14 @@ pub fn update_tiles_event(
                     sprite.color = Color::WHITE;
                 } else {
                     let tile = board.board.get(&tile.coord).unwrap();
-                    sprite.color = tile_colour(tile);
+                    sprite.color = tile.colour();
                 }
             }
         } else if card == None {
             // Clear everything
             for (mut sprite, tile) in tiles.iter_mut() {
                 let tile = board.board.get(&tile.coord).unwrap();
-                sprite.color = tile_colour(tile);
+                sprite.color = tile.colour();
             }
         }
         er.clear();
@@ -125,10 +124,11 @@ pub struct Tile {
 }
 
 pub fn create_board(mut cmd: Commands) {
+    cmd.insert_resource(CursorCoord(None));
     let board = Board::new();
 
     for (&coord, tile) in board.board.iter() {
-        let color = tile_colour(tile);
+        let color = tile.colour();
         let pos = board_to_world(board.dimensions, coord).extend(0.);
 
         cmd.spawn(SpriteBundle {
@@ -166,27 +166,29 @@ pub enum TileData {
     },
 }
 
-fn tile_colour(tile: &TileData) -> Color {
-    match tile {
-        TileData::Empty => Color::rgb(0.2, 0.2, 0.2),
+impl TileData {
+    pub fn colour(&self) -> Color {
+        match self {
+            TileData::Empty => Color::rgb(0.2, 0.2, 0.2),
 
-        TileData::Wall => Color::rgb(0.7, 0.7, 0.7),
+            TileData::Wall => Color::rgb(0.7, 0.7, 0.7),
 
-        TileData::PlayerSquare {
-            player: Player::P1,
-            special: false,
-        } => Color::rgb(0.7, 0.8, 0.2),
-        TileData::PlayerSquare {
-            player: Player::P1,
-            special: true,
-        } => Color::rgb(0.8, 0.5, 0.2),
+            TileData::PlayerSquare {
+                player: Player::P1,
+                special: false,
+            } => Color::rgb(0.7, 0.8, 0.2),
+            TileData::PlayerSquare {
+                player: Player::P1,
+                special: true,
+            } => Color::rgb(0.8, 0.5, 0.2),
 
-        TileData::PlayerSquare {
-            player: Player::P2, special: false,
-        } => Color::rgb(0.22, 0.29, 0.93),
-        TileData::PlayerSquare {
-            player: Player::P2, special: true,
-        } => Color::rgb(0.2, 0.9, 0.93),
+            TileData::PlayerSquare {
+                player: Player::P2, special: false,
+            } => Color::rgb(0.22, 0.29, 0.93),
+            TileData::PlayerSquare {
+                player: Player::P2, special: true,
+            } => Color::rgb(0.2, 0.9, 0.93),
+        }
     }
 }
 
