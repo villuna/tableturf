@@ -97,11 +97,17 @@ pub fn update_tiles_event(
         if let Some((card, coord)) = card.zip(coord) {
             let card = rotate_card(&player_state.state.deck[card.card], card.rotation);
             for (mut sprite, tile) in tiles.iter_mut() {
-                if card
+                if let Some(special) = card
                     .iter()
-                    .any(|(ctile, _)| Coord(ctile.0 + coord.0, ctile.1 + coord.1) == tile.coord)
+                    .find_map(|(ctile, special)| (Coord(ctile.0 + coord.0, ctile.1 + coord.1) == tile.coord)
+                        .then_some(*special))
                 {
-                    sprite.color = Color::WHITE;
+                    let colour = TileData::PlayerSquare { player: Player::P1, special }.colour();
+                    let base_colour = TileData::Empty.colour();
+                    let blend = 0.4;
+
+                    let blended = colour * [blend; 4] + base_colour * [(1. - blend); 4];
+                    sprite.color = blended;
                 } else {
                     let tile = board.board.get(&tile.coord).unwrap();
                     sprite.color = tile.colour();

@@ -121,107 +121,130 @@ pub(crate) enum Move {
 pub(crate) fn setup_game(
     mut cmd: Commands,
     assets: Res<AssetServer>,
+    mut create_previews: EventWriter<RecreatePreviewsEvent>,
 ) {
-    let player = PlayerState {
+    cmd.insert_resource(PlayerState {
         state: ActorState::new(TEST_DECK),
         selected_card: None,
-    };
+    });
     cmd.insert_resource(Opponent::new(RandomMove, TEST_DECK));
 
-    let card_texture = assets.load("tableturf_card.png");
+    let card_sprite = assets.load("tableturf_card.png");
     let number_font = assets.load("FiraSans-Black.ttf");
-    let number_style = TextStyle {
-        font: number_font.clone(),
-        font_size: 50.,
-        color: Color::WHITE,
-    };
 
-    // Create card previews
-    for (i, cid) in player.state.hand.iter().cloned().enumerate() {
-        let card = player.state.deck[cid];
+    cmd.insert_resource(AssetCache { card_sprite, number_font });
+    create_previews.send(RecreatePreviewsEvent);
+}
 
-        let pos_y = if i <= 1 {
-            130.
-        } else {
-            -130.
+#[derive(Component)]
+pub(crate) struct CardPreview;
+
+#[derive(Event)]
+pub(crate) struct RecreatePreviewsEvent;
+
+pub(crate) fn recreate_previews(
+    current_previews: Query<Entity, With<CardPreview>>,
+    mut event: EventReader<RecreatePreviewsEvent>,
+    mut cmd: Commands,
+    player: Res<PlayerState>,
+    assets: Res<AssetCache>,
+) {
+    if !event.is_empty() {
+        println!("recreating the deck!");
+        // destroy existing previews
+        for entity in current_previews.iter() {
+            cmd.entity(entity).despawn_recursive();
+        }
+         
+        let number_style = TextStyle {
+            font: assets.number_font.clone(),
+            font_size: 50.,
+            color: Color::WHITE,
         };
 
-        let pos_x = -600. + (i % 2) as f32 * 190.;
+        // Create card previews
+        for (i, cid) in player.state.hand.iter().cloned().enumerate() {
+            let card = player.state.deck[cid];
 
-        // This shit sucks so bad
-        // i stg if i was using godot id be unstoppable
-        // ...
-        // why am i doing this again?
-        cmd.spawn(SpriteBundle {
-            texture: card_texture.clone(),
-            transform: Transform::from_translation(Vec3::new(pos_x, pos_y, 1.)).with_scale(Vec3::new(0.9, 0.9, 1.0)),
-            ..default()
-        }).with_children(|cb| {
-            let tile_size = 15.;
+            let pos_y = if i <= 1 {
+                130.
+            } else {
+                -130.
+            };
 
-            for i in -4..=5 {
-                for j in -4..=5 {
-                    let colour = if let Some((_, special)) = card.tiles.iter().find(|(pos, _)| *pos == Coord(i, j)) {
-                        TileData::PlayerSquare { player: Player::P1, special: *special }.colour()
-                    } else {
-                        Color::rgba(0.1, 0.1, 0.1, 0.8)
-                    };
+            let pos_x = -600. + (i % 2) as f32 * 190.;
 
-                    let y_offset = 30.;
-                    let x_offset = 0.;
-
-                    let transform = Transform::from_translation(Vec3::new(
-                        (i as f32 - 0.5) * (tile_size + 1.0) + x_offset,
-                        j as f32 * (tile_size + 1.0) + y_offset,
-                        1.5
-                    ));
-                    
-                    cb.spawn(SpriteBundle {
-                        sprite: Sprite {
-                            custom_size: Some(Vec2::new(tile_size, tile_size)),
-                            color: colour,
-                            ..default()
-                        },
-                        transform,
-                        ..default()
-                    });
-                }
-            }
-
-            cb.spawn(Text2dBundle {
-                text: Text::from_section(format!("{:?}", card.tiles.len()), number_style.clone()),
-                transform: Transform::from_translation(Vec3::new(
-                    -60.,
-                    -90.,
-                    2.,
-                )),
+            // This shit sucks so bad
+            // i stg if i was using godot id be unstoppable
+            // ...
+            // why am i doing this again?
+            cmd.spawn(SpriteBundle {
+                texture: assets.card_sprite.clone(),
+                transform: Transform::from_translation(Vec3::new(pos_x, pos_y, 1.)).with_scale(Vec3::new(0.9, 0.9, 1.0)),
                 ..default()
-            });
+            }).with_children(|cb| {
+                let tile_size = 15.;
 
-            let special_tile_size = 12.;
-            for i in 0..card.special_cost {
-                cb.spawn(SpriteBundle {
-                    sprite: Sprite {
-                        custom_size: Some(Vec2::new(special_tile_size, special_tile_size)),
-                        color: TileData::PlayerSquare { player: Player::P1, special: true }.colour(),
-                        ..default()
-                    },
+                for i in -4..=5 {
+                    for j in -4..=5 {
+                        let colour = if let Some((_, special)) = card.tiles.iter().find(|(pos, _)| *pos == Coord(i, j)) {
+                            TileData::PlayerSquare { player: Player::P1, special: *special }.colour()
+                        } else {
+                            Color::rgba(0.1, 0.1, 0.1, 0.8)
+                        };
+
+                        let y_offset = 30.;
+                        let x_offset = 0.;
+
+                        let transform = Transform::from_translation(Vec3::new(
+                            (i as f32 - 0.5) * (tile_size + 1.0) + x_offset,
+                            j as f32 * (tile_size + 1.0) + y_offset,
+                            1.5
+                        ));
+                        
+                        cb.spawn(SpriteBundle {
+                            sprite: Sprite {
+                                custom_size: Some(Vec2::new(tile_size, tile_size)),
+                                color: colour,
+                                ..default()
+                            },
+                            transform,
+                            ..default()
+                        });
+                    }
+                }
+
+                cb.spawn(Text2dBundle {
+                    text: Text::from_section(format!("{:?}", card.tiles.len()), number_style.clone()),
                     transform: Transform::from_translation(Vec3::new(
-                        -20. + (special_tile_size + 1.) * i as f32,
+                        -60.,
                         -90.,
                         2.,
                     )),
                     ..default()
                 });
-            }
-        });
-    }
 
-    cmd.insert_resource(AssetCache { 
-        card_sprite: card_texture,
-        number_font,
-    });
-    cmd.insert_resource(player);
+                let special_tile_size = 12.;
+                for i in 0..card.special_cost {
+                    cb.spawn(SpriteBundle {
+                        sprite: Sprite {
+                            custom_size: Some(Vec2::new(special_tile_size, special_tile_size)),
+                            color: TileData::PlayerSquare { player: Player::P1, special: true }.colour(),
+                            ..default()
+                        },
+                        transform: Transform::from_translation(Vec3::new(
+                            -20. + (special_tile_size + 1.) * i as f32,
+                            -90.,
+                            2.,
+                        )),
+                        ..default()
+                    });
+                }
+            });
+        }
+
+        event.clear();
+    }
 }
 
 pub(crate) fn rotate(
@@ -270,6 +293,7 @@ pub(crate) fn execute_turn(
     mut opponent: ResMut<Opponent>,
     mut player: ResMut<PlayerState>,
     mut update_tiles: EventWriter<UpdateTiles>,
+    mut create_previews: EventWriter<RecreatePreviewsEvent>,
 ) {
     if let Some(MoveMade(player_move)) = player_move_event.read().cloned().next() {
         let opponent_move = opponent.make_move(&board);
@@ -327,5 +351,6 @@ pub(crate) fn execute_turn(
 
         board.board.extend(temporary_board);
         update_tiles.send(UpdateTiles);
+        create_previews.send(RecreatePreviewsEvent);
     }
 }
