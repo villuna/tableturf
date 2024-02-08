@@ -6,6 +6,7 @@ use bevy::prelude::*;
 use bevy::utils::HashMap;
 
 const TILE_SIZE: f32 = 32.;
+const BOARD_X_OFFSET: f32 = 200.;
 
 // Wrapper for an unsigned integer 2d coordinate that I can use for the board
 #[derive(Eq, PartialEq, Copy, Clone, Debug, Hash)]
@@ -25,7 +26,7 @@ fn world_to_board(dimensions: (i32, i32), position: Vec2) -> Option<Coord> {
     let w = TILE_SIZE + 1.;
     let hw = w / 2.0;
 
-    let centred_x = ((position.x + hw) / w).floor() as i32;
+    let centred_x = ((position.x - 2.0 * BOARD_X_OFFSET + hw) / w).floor() as i32;
     let centred_y = ((position.y + hw) / w).floor() as i32;
 
     let offset_x = (dimensions.0 as f32 / 2.).floor() as i32;
@@ -44,7 +45,7 @@ fn board_to_world(dimensions: (i32, i32), position: Coord) -> Vec2 {
     let base_y = -((dimensions.1 as f32 - 1.) * (TILE_SIZE + 1.)) / 2.;
 
     Vec2::new(
-        base_x + position.0 as f32 * (TILE_SIZE + 1.),
+        base_x + BOARD_X_OFFSET + position.0 as f32 * (TILE_SIZE + 1.),
         base_y + position.1 as f32 * (TILE_SIZE + 1.),
     )
 }
@@ -81,7 +82,6 @@ pub struct UpdateTiles;
 pub fn update_tiles_event(
     board: Res<Board>,
     mut er: EventReader<UpdateTiles>,
-    // for changing the colour of tiles
     mut tiles: Query<(&mut Sprite, &Tile)>,
     cursor_coord: Res<CursorCoord>,
     player_state: Res<PlayerState>,
@@ -97,12 +97,14 @@ pub fn update_tiles_event(
         if let Some((card, coord)) = card.zip(coord) {
             let card = rotate_card(&player_state.state.deck[card.card], card.rotation);
             for (mut sprite, tile) in tiles.iter_mut() {
-                if let Some(special) = card
-                    .iter()
-                    .find_map(|(ctile, special)| (Coord(ctile.0 + coord.0, ctile.1 + coord.1) == tile.coord)
-                        .then_some(*special))
-                {
-                    let colour = TileData::PlayerSquare { player: Player::P1, special }.colour();
+                if let Some(special) = card.iter().find_map(|(ctile, special)| {
+                    (Coord(ctile.0 + coord.0, ctile.1 + coord.1) == tile.coord).then_some(*special)
+                }) {
+                    let colour = TileData::PlayerSquare {
+                        player: Player::P1,
+                        special,
+                    }
+                    .colour();
                     let base_colour = TileData::Empty.colour();
                     let blend = 0.4;
 
@@ -135,7 +137,8 @@ pub fn create_board(mut cmd: Commands) {
 
     for (&coord, tile) in board.board.iter() {
         let color = tile.colour();
-        let pos = board_to_world(board.dimensions, coord).extend(0.);
+        let pos =
+            (board_to_world(board.dimensions, coord) + Vec2::new(BOARD_X_OFFSET, 0.)).extend(0.);
 
         cmd.spawn(SpriteBundle {
             sprite: Sprite {
@@ -166,10 +169,7 @@ pub fn create_board(mut cmd: Commands) {
 pub enum TileData {
     Empty,
     Wall,
-    PlayerSquare {
-        player: Player, 
-        special: bool
-    },
+    PlayerSquare { player: Player, special: bool },
 }
 
 impl TileData {
@@ -189,10 +189,12 @@ impl TileData {
             } => Color::rgb(0.8, 0.5, 0.2),
 
             TileData::PlayerSquare {
-                player: Player::P2, special: false,
+                player: Player::P2,
+                special: false,
             } => Color::rgb(0.22, 0.29, 0.93),
             TileData::PlayerSquare {
-                player: Player::P2, special: true,
+                player: Player::P2,
+                special: true,
             } => Color::rgb(0.2, 0.9, 0.93),
         }
     }

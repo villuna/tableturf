@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use crate::{
     ai::{Opponent, RandomMove},
-    board::{Board, Coord, TileData, UpdateTiles, CursorCoord},
-    cards::{rotate_card, CardData, Rotation, HERO_SHOT, is_placeable},
-    Player, AssetCache,
+    board::{Board, Coord, CursorCoord, TileData, UpdateTiles},
+    cards::{is_placeable, rotate_card, CardData, Rotation, HERO_SHOT},
+    AssetCache, Player,
 };
 use bevy::{prelude::*, utils::HashMap};
 use rand::seq::IteratorRandom;
@@ -43,7 +43,9 @@ impl ActorState {
                 *card_id
             }
 
-            Move::Play { card_id, special, .. } => {
+            Move::Play {
+                card_id, special, ..
+            } => {
                 if *special {
                     let cost = self.deck[self.hand[*card_id]].special_cost;
 
@@ -59,12 +61,12 @@ impl ActorState {
 
         self.discard.push(self.hand[removed]);
 
-        let drawn = (0..15)
+        if let Some(drawn) = (0..15)
             .filter(|i| !self.discard.contains(i) && !self.hand.contains(i))
             .choose(&mut rng)
-            .unwrap();
-
-        self.hand[removed] = drawn;
+        {
+            self.hand[removed] = drawn;
+        }
     }
 }
 
@@ -92,10 +94,12 @@ pub fn toggle_selected_card(
 
     if let Some(num) = pressed {
         match player_state.selected_card {
-            None => player_state.selected_card = Some(SelectedCard { 
-                card: num,
-                rotation: Rotation::Up,
-            }),
+            None => {
+                player_state.selected_card = Some(SelectedCard {
+                    card: num,
+                    rotation: Rotation::Up,
+                })
+            }
             Some(_) => player_state.selected_card = None,
         }
 
@@ -103,6 +107,8 @@ pub fn toggle_selected_card(
     }
 }
 
+#[derive(Resource)]
+pub(crate) struct TurnsLeft(pub usize);
 
 #[derive(Event, Clone, Copy, Debug)]
 pub(crate) struct MoveMade(pub Move);
@@ -127,12 +133,16 @@ pub(crate) fn setup_game(
         state: ActorState::new(TEST_DECK),
         selected_card: None,
     });
+    cmd.insert_resource(TurnsLeft(12));
     cmd.insert_resource(Opponent::new(RandomMove, TEST_DECK));
 
     let card_sprite = assets.load("tableturf_card.png");
     let number_font = assets.load("FiraSans-Black.ttf");
 
-    cmd.insert_resource(AssetCache { card_sprite, number_font });
+    cmd.insert_resource(AssetCache {
+        card_sprite,
+        number_font,
+    });
     create_previews.send(RecreatePreviewsEvent);
 }
 
@@ -155,7 +165,7 @@ pub(crate) fn recreate_previews(
         for entity in current_previews.iter() {
             cmd.entity(entity).despawn_recursive();
         }
-         
+
         let number_style = TextStyle {
             font: assets.number_font.clone(),
             font_size: 50.,
@@ -166,13 +176,9 @@ pub(crate) fn recreate_previews(
         for (i, cid) in player.state.hand.iter().cloned().enumerate() {
             let card = player.state.deck[cid];
 
-            let pos_y = if i <= 1 {
-                130.
-            } else {
-                -130.
-            };
+            let pos_y = if i <= 1 { 130. } else { -130. };
 
-            let pos_x = -600. + (i % 2) as f32 * 190.;
+            let pos_x = -700. + (i % 2) as f32 * 190.;
 
             // This shit sucks so bad
             // i stg if i was using godot id be unstoppable
@@ -180,15 +186,23 @@ pub(crate) fn recreate_previews(
             // why am i doing this again?
             cmd.spawn(SpriteBundle {
                 texture: assets.card_sprite.clone(),
-                transform: Transform::from_translation(Vec3::new(pos_x, pos_y, 1.)).with_scale(Vec3::new(0.9, 0.9, 1.0)),
+                transform: Transform::from_translation(Vec3::new(pos_x, pos_y, 1.))
+                    .with_scale(Vec3::new(0.9, 0.9, 1.0)),
                 ..default()
-            }).with_children(|cb| {
+            })
+            .with_children(|cb| {
                 let tile_size = 15.;
 
                 for i in -4..=5 {
                     for j in -4..=5 {
-                        let colour = if let Some((_, special)) = card.tiles.iter().find(|(pos, _)| *pos == Coord(i, j)) {
-                            TileData::PlayerSquare { player: Player::P1, special: *special }.colour()
+                        let colour = if let Some((_, special)) =
+                            card.tiles.iter().find(|(pos, _)| *pos == Coord(i, j))
+                        {
+                            TileData::PlayerSquare {
+                                player: Player::P1,
+                                special: *special,
+                            }
+                            .colour()
                         } else {
                             Color::rgba(0.1, 0.1, 0.1, 0.8)
                         };
@@ -199,9 +213,9 @@ pub(crate) fn recreate_previews(
                         let transform = Transform::from_translation(Vec3::new(
                             (i as f32 - 0.5) * (tile_size + 1.0) + x_offset,
                             j as f32 * (tile_size + 1.0) + y_offset,
-                            1.5
+                            1.5,
                         ));
-                        
+
                         cb.spawn(SpriteBundle {
                             sprite: Sprite {
                                 custom_size: Some(Vec2::new(tile_size, tile_size)),
@@ -215,12 +229,11 @@ pub(crate) fn recreate_previews(
                 }
 
                 cb.spawn(Text2dBundle {
-                    text: Text::from_section(format!("{:?}", card.tiles.len()), number_style.clone()),
-                    transform: Transform::from_translation(Vec3::new(
-                        -60.,
-                        -90.,
-                        2.,
-                    )),
+                    text: Text::from_section(
+                        format!("{:?}", card.tiles.len()),
+                        number_style.clone(),
+                    ),
+                    transform: Transform::from_translation(Vec3::new(-60., -90., 2.)),
                     ..default()
                 });
 
@@ -229,7 +242,11 @@ pub(crate) fn recreate_previews(
                     cb.spawn(SpriteBundle {
                         sprite: Sprite {
                             custom_size: Some(Vec2::new(special_tile_size, special_tile_size)),
-                            color: TileData::PlayerSquare { player: Player::P1, special: true }.colour(),
+                            color: TileData::PlayerSquare {
+                                player: Player::P1,
+                                special: true,
+                            }
+                            .colour(),
                             ..default()
                         },
                         transform: Transform::from_translation(Vec3::new(
@@ -274,7 +291,14 @@ pub(crate) fn make_move(
     } else if let Some((card, coord)) = player_state.selected_card.as_ref().zip(cursor_coord.0) {
         if mouse.just_pressed(MouseButton::Left) {
             let rotation = card.rotation;
-            if is_placeable(&board, Player::P1, &player_state.state.deck[card.card], rotation, coord, false) {
+            if is_placeable(
+                &board,
+                Player::P1,
+                &player_state.state.deck[card.card],
+                rotation,
+                coord,
+                false,
+            ) {
                 player_state.selected_card = None;
                 play_move.send(MoveMade(Move::Play {
                     card_id: 0,
@@ -294,6 +318,7 @@ pub(crate) fn execute_turn(
     mut player: ResMut<PlayerState>,
     mut update_tiles: EventWriter<UpdateTiles>,
     mut create_previews: EventWriter<RecreatePreviewsEvent>,
+    mut turns_left: ResMut<TurnsLeft>,
 ) {
     if let Some(MoveMade(player_move)) = player_move_event.read().cloned().next() {
         let opponent_move = opponent.make_move(&board);
@@ -303,13 +328,21 @@ pub(crate) fn execute_turn(
         let mut player_card_power = None;
 
         match player_move {
-            Move::Pass(_) => {},
-            Move::Play { card_id, pos, rot, .. } => {
+            Move::Pass(_) => {}
+            Move::Play {
+                card_id, pos, rot, ..
+            } => {
                 let card = rotate_card(&player.state.deck[card_id], rot);
                 player_card_power = Some(card.len());
 
                 for (tile_pos, special) in card {
-                    temporary_board.insert(tile_pos + pos, TileData::PlayerSquare { player: Player::P1, special });
+                    temporary_board.insert(
+                        tile_pos + pos,
+                        TileData::PlayerSquare {
+                            player: Player::P1,
+                            special,
+                        },
+                    );
                 }
             }
         }
@@ -317,8 +350,10 @@ pub(crate) fn execute_turn(
         player.state.make_move(&player_move);
 
         match opponent_move {
-            Move::Pass(_) => {},
-            Move::Play { card_id, pos, rot, .. } => {
+            Move::Pass(_) => {}
+            Move::Play {
+                card_id, pos, rot, ..
+            } => {
                 let card = rotate_card(&opponent.deck()[card_id], rot);
 
                 let priority = if let Some(power) = player_card_power {
@@ -337,11 +372,17 @@ pub(crate) fn execute_turn(
                     let new_tile = if temporary_board.contains_key(&(tile_pos + pos)) {
                         match priority {
                             None => Some(TileData::Wall),
-                            Some(Player::P2) => Some(TileData::PlayerSquare { player: Player::P2, special }),
+                            Some(Player::P2) => Some(TileData::PlayerSquare {
+                                player: Player::P2,
+                                special,
+                            }),
                             _ => None,
                         }
                     } else {
-                        Some(TileData::PlayerSquare { player: Player::P2, special })
+                        Some(TileData::PlayerSquare {
+                            player: Player::P2,
+                            special,
+                        })
                     };
 
                     temporary_board.extend(new_tile.map(|nt| (tile_pos + pos, nt)));
@@ -352,5 +393,6 @@ pub(crate) fn execute_turn(
         board.board.extend(temporary_board);
         update_tiles.send(UpdateTiles);
         create_previews.send(RecreatePreviewsEvent);
+        turns_left.0 -= 1;
     }
 }

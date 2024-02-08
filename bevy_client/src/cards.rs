@@ -72,10 +72,10 @@ pub(crate) fn is_placeable(
     let card = rotate_card(card, rotation);
 
     let no_obstructions = card.iter().all(|(tile_pos, _)| {
-        board
-            .board
-            .get(&(*tile_pos + position))
-            .is_some_and(|t| *t == TileData::Empty || special && matches!(t, TileData::PlayerSquare { special: false, .. }))
+        board.board.get(&(*tile_pos + position)).is_some_and(|t| {
+            *t == TileData::Empty
+                || special && matches!(t, TileData::PlayerSquare { special: false, .. })
+        })
     });
 
     let any_adjacent = card.iter().any(|(tile_pos, _)| {
@@ -88,7 +88,9 @@ pub(crate) fn is_placeable(
                 if board
                     .board
                     .get(&(*tile_pos + position + Coord(dx, dy)))
-                    .is_some_and(|t| matches!(t, TileData::PlayerSquare { player: p, .. } if player == *p))
+                    .is_some_and(
+                        |t| matches!(t, TileData::PlayerSquare { player: p, .. } if player == *p),
+                    )
                 {
                     return true;
                 }
@@ -129,4 +131,3 @@ pub fn possible_card_placements(
 
     moves
 }
-

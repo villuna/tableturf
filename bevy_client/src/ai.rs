@@ -1,8 +1,13 @@
 use std::sync::Arc;
 
-use rand::{seq::SliceRandom, Rng};
+use crate::{
+    board::Board,
+    cards::{possible_card_placements, CardData},
+    game::{ActorState, Move},
+    Player,
+};
 use bevy::prelude::*;
-use crate::{board::Board, cards::{CardData, possible_card_placements}, game::{Move, ActorState}, Player};
+use rand::{seq::SliceRandom, Rng};
 
 /// An AiOpponent implements some algorithm that calculates what the next turn is given the current
 /// state of the board and other info
@@ -28,12 +33,14 @@ impl Opponent {
 
     pub(crate) fn make_move(&mut self, board: &Board) -> Move {
         let move_made = self.ai.next_move(board, &self.state);
-        self.state.make_move(&move_made); 
+        self.state.make_move(&move_made);
 
         move_made
     }
 
-    pub(crate) fn deck(&self) -> &[CardData] { self.state.deck.as_ref() }
+    pub(crate) fn deck(&self) -> &[CardData] {
+        self.state.deck.as_ref()
+    }
 }
 
 /// An opponent that makes moves at "random".
@@ -51,7 +58,8 @@ impl AIOpponent for RandomMove {
         }
 
         // Pick a random card that has spaces left, then a random space.
-        let mut order = state.hand
+        let mut order = state
+            .hand
             .iter()
             .cloned()
             .map(|i| &state.deck[i])
@@ -68,7 +76,7 @@ impl AIOpponent for RandomMove {
                     card_id: index,
                     pos: *pos,
                     rot: *rot,
-                    special: *special, 
+                    special: *special,
                 };
             }
         }
