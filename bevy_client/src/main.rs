@@ -6,12 +6,12 @@ mod ui;
 mod utils;
 
 use bevy::{app::AppExit, prelude::*};
-use board::{create_board, mouse_over_tile, update_tiles_event, UpdateTiles};
+use board::{mouse_over_tile, update_tiles_event, UpdateTiles};
 use game::{
     execute_turn, make_move, recreate_previews, rotate, setup_game, toggle_selected_card, MoveMade,
-    RecreatePreviewsEvent,
+    RecreatePreviewsEvent, restart_game,
 };
-use ui::{create_ui, update_tile_text, update_turn_text};
+use ui::{create_ui, update_tile_text, update_turn_text, show_game_over};
 use utils::cursor::*;
 
 // Is there a better way to do this?
@@ -46,7 +46,7 @@ fn main() {
         .add_plugins((DefaultPlugins, CursorTrackerPlugin))
         .add_systems(Update, exit_on_esc_system)
         .add_systems(Startup, startup)
-        .add_systems(Startup, (create_board, setup_game, create_ui))
+        .add_systems(Startup, (setup_game, create_ui))
         .add_systems(Update, (rotate, toggle_selected_card))
         .add_systems(
             Update,
@@ -54,6 +54,7 @@ fn main() {
         )
         .add_systems(Update, make_move.after(mouse_over_tile))
         .add_systems(Update, execute_turn.after(make_move))
+        .add_systems(Update, restart_game)
         .add_systems(
             Update,
             (
@@ -61,6 +62,7 @@ fn main() {
                 recreate_previews,
                 update_turn_text,
                 update_tile_text,
+                show_game_over,
             )
                 .after(execute_turn),
         )

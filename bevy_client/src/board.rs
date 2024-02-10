@@ -1,5 +1,5 @@
 use crate::cards::*;
-use crate::game::PlayerState;
+use crate::game::GameState;
 use crate::utils::cursor::*;
 use crate::Player;
 use bevy::prelude::*;
@@ -55,7 +55,7 @@ pub struct CursorCoord(pub Option<Coord>);
 
 pub fn mouse_over_tile(
     // for calculating board coordinates
-    board: Res<Board>,
+    gs: Res<GameState>,
     cursor_pos: Res<CursorPosition>,
     // for checking if the cursor was moved
     cursor_moved: EventReader<CursorMoved>,
@@ -68,7 +68,7 @@ pub fn mouse_over_tile(
     }
 
     // At this point we know the cursor has moved and there is a hovering card
-    let coord = world_to_board(board.dimensions, cursor_pos.0);
+    let coord = world_to_board(gs.board.dimensions, cursor_pos.0);
 
     if coord != cursor_coord.0 {
         cursor_coord.0 = coord;
@@ -80,13 +80,12 @@ pub fn mouse_over_tile(
 pub struct UpdateTiles;
 
 pub fn update_tiles_event(
-    board: Res<Board>,
     mut er: EventReader<UpdateTiles>,
     mut tiles: Query<(&mut Sprite, &Tile)>,
     cursor_coord: Res<CursorCoord>,
-    player_state: Res<PlayerState>,
+    gs: ResMut<GameState>,
 ) {
-    let card = player_state.selected_card.as_ref();
+    let card = gs.selected_card.as_ref();
     let coord = cursor_coord.0;
 
     if !er.is_empty() {
@@ -95,7 +94,7 @@ pub fn update_tiles_event(
         // If there *is* a card selected but the cursor is not on the board, we do nothing so that
         // any highlighted squares that *were* there stay there.
         if let Some((card, coord)) = card.zip(coord) {
-            let card = rotate_card(&player_state.state.deck[card.card], card.rotation);
+            let card = rotate_card(&gs.player_state.deck[card.card], card.rotation);
             for (mut sprite, tile) in tiles.iter_mut() {
                 if let Some(special) = card.iter().find_map(|(ctile, special)| {
                     (Coord(ctile.0 + coord.0, ctile.1 + coord.1) == tile.coord).then_some(*special)
@@ -111,14 +110,14 @@ pub fn update_tiles_event(
                     let blended = colour * [blend; 4] + base_colour * [(1. - blend); 4];
                     sprite.color = blended;
                 } else {
-                    let tile = board.board.get(&tile.coord).unwrap();
+                    let tile = gs.board.board.get(&tile.coord).unwrap();
                     sprite.color = tile.colour();
                 }
             }
         } else if card == None {
             // Clear everything
             for (mut sprite, tile) in tiles.iter_mut() {
-                let tile = board.board.get(&tile.coord).unwrap();
+                let tile = gs.board.board.get(&tile.coord).unwrap();
                 sprite.color = tile.colour();
             }
         }
@@ -131,10 +130,7 @@ pub struct Tile {
     coord: Coord,
 }
 
-pub fn create_board(mut cmd: Commands) {
-    cmd.insert_resource(CursorCoord(None));
-    let board = Board::new();
-
+pub fn create_board(cmd: &mut Commands, board: &Board) {
     for (&coord, tile) in board.board.iter() {
         let color = tile.colour();
         let pos =
@@ -161,8 +157,6 @@ pub fn create_board(mut cmd: Commands) {
         })
         .insert(Tile { coord });
     }
-
-    cmd.insert_resource(board);
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -172,42 +166,48 @@ pub enum TileData {
     PlayerSquare { player: Player, special: bool },
 }
 
+pub const EMPTY_COLOUR: Color = Color::rgb(0.1, 0.1, 0.1);
+pub const WALL_COLOUR: Color = Color::rgb(0.7, 0.7, 0.7);
+pub const P1_COLOUR: Color = Color::rgb(0.7, 0.8, 0.2);
+pub const P1_SPECIAL_COLOUR: Color = Color::rgb(0.8, 0.5, 0.2);
+pub const P2_COLOUR: Color = Color::rgb(0.22, 0.29, 0.93);
+pub const P2_SPECIAL_COLOUR: Color = Color::rgb(0.2, 0.9, 0.93);
+
 impl TileData {
     pub fn colour(&self) -> Color {
         match self {
-            TileData::Empty => Color::rgb(0.2, 0.2, 0.2),
+            TileData::Empty => EMPTY_COLOUR,
 
-            TileData::Wall => Color::rgb(0.7, 0.7, 0.7),
+            TileData::Wall => WALL_COLOUR,
 
             TileData::PlayerSquare {
                 player: Player::P1,
                 special: false,
-            } => Color::rgb(0.7, 0.8, 0.2),
+            } => P1_COLOUR,
             TileData::PlayerSquare {
                 player: Player::P1,
                 special: true,
-            } => Color::rgb(0.8, 0.5, 0.2),
+            } => P1_SPECIAL_COLOUR,
 
             TileData::PlayerSquare {
                 player: Player::P2,
                 special: false,
-            } => Color::rgb(0.22, 0.29, 0.93),
+            } => P2_COLOUR,
             TileData::PlayerSquare {
                 player: Player::P2,
                 special: true,
-            } => Color::rgb(0.2, 0.9, 0.93),
+            } => P2_SPECIAL_COLOUR,
         }
     }
 }
 
-#[derive(Resource)]
 pub struct Board {
     pub board: HashMap<Coord, TileData>,
     pub dimensions: (i32, i32),
 }
 
 impl Board {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let mut board = HashMap::new();
 
         let dimensions = (17, 23);

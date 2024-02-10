@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::{
     ai::{Opponent, RandomMove},
-    board::{Board, Coord, CursorCoord, TileData, UpdateTiles},
+    board::{create_board, Board, Coord, CursorCoord, TileData, UpdateTiles, Tile},
     cards::{is_placeable, rotate_card, CardData, Rotation, HERO_SHOT},
     AssetCache, Player,
 };
@@ -76,39 +76,32 @@ pub struct SelectedCard {
     pub rotation: Rotation,
 }
 
-#[derive(Resource)]
-pub(crate) struct PlayerState {
-    pub(crate) state: ActorState,
-    pub(crate) selected_card: Option<SelectedCard>,
-}
-
 pub fn toggle_selected_card(
     input: Res<Input<KeyCode>>,
-    mut player_state: ResMut<PlayerState>,
+    mut gs: ResMut<GameState>,
     mut ew: EventWriter<UpdateTiles>,
 ) {
-    let pressed = [KeyCode::Key1, KeyCode::Key2, KeyCode::Key3, KeyCode::Key4]
-        .into_iter()
-        .enumerate()
-        .find_map(|(i, kc)| input.just_pressed(kc).then_some(i + 1));
+    if !gs.game_over {
+        let pressed = [KeyCode::Key1, KeyCode::Key2, KeyCode::Key3, KeyCode::Key4]
+            .into_iter()
+            .enumerate()
+            .find_map(|(i, kc)| input.just_pressed(kc).then_some(i + 1));
 
-    if let Some(num) = pressed {
-        match player_state.selected_card {
-            None => {
-                player_state.selected_card = Some(SelectedCard {
-                    card: num,
-                    rotation: Rotation::Up,
-                })
+        if let Some(num) = pressed {
+            match gs.selected_card {
+                None => {
+                    gs.selected_card = Some(SelectedCard {
+                        card: num,
+                        rotation: Rotation::Up,
+                    })
+                }
+                Some(_) => gs.selected_card = None,
             }
-            Some(_) => player_state.selected_card = None,
-        }
 
-        ew.send(UpdateTiles);
+            ew.send(UpdateTiles);
+        }
     }
 }
-
-#[derive(Resource)]
-pub(crate) struct TurnsLeft(pub usize);
 
 #[derive(Event, Clone, Copy, Debug)]
 pub(crate) struct MoveMade(pub Move);
@@ -124,17 +117,38 @@ pub(crate) enum Move {
     },
 }
 
+#[derive(Resource)]
+pub(crate) struct GameState {
+    pub turns_left: usize,
+    pub player_state: ActorState,
+    pub selected_card: Option<SelectedCard>,
+    pub opponent: Opponent,
+    pub board: Board,
+    pub game_over: bool,
+}
+
+impl GameState {
+    pub(crate) fn new(board: Board) -> Self {
+        Self {
+            player_state: ActorState::new(TEST_DECK),
+            opponent: Opponent::new(RandomMove, TEST_DECK),
+            selected_card: None,
+            turns_left: 12,
+            board,
+            game_over: false,
+        }
+    }
+}
+
 pub(crate) fn setup_game(
     mut cmd: Commands,
     assets: Res<AssetServer>,
     mut create_previews: EventWriter<RecreatePreviewsEvent>,
 ) {
-    cmd.insert_resource(PlayerState {
-        state: ActorState::new(TEST_DECK),
-        selected_card: None,
-    });
-    cmd.insert_resource(TurnsLeft(12));
-    cmd.insert_resource(Opponent::new(RandomMove, TEST_DECK));
+    cmd.insert_resource(CursorCoord(None));
+    let board = Board::new();
+    create_board(&mut cmd, &board);
+    cmd.insert_resource(GameState::new(board));
 
     let card_sprite = assets.load("tableturf_card.png");
     let number_font = assets.load("FiraSans-Black.ttf");
@@ -156,7 +170,7 @@ pub(crate) fn recreate_previews(
     current_previews: Query<Entity, With<CardPreview>>,
     mut event: EventReader<RecreatePreviewsEvent>,
     mut cmd: Commands,
-    player: Res<PlayerState>,
+    gs: Res<GameState>,
     assets: Res<AssetCache>,
 ) {
     if !event.is_empty() {
@@ -173,8 +187,8 @@ pub(crate) fn recreate_previews(
         };
 
         // Create card previews
-        for (i, cid) in player.state.hand.iter().cloned().enumerate() {
-            let card = player.state.deck[cid];
+        for (i, cid) in gs.player_state.hand.iter().cloned().enumerate() {
+            let card = gs.player_state.deck[cid];
 
             let pos_y = if i <= 1 { 130. } else { -130. };
 
@@ -266,11 +280,11 @@ pub(crate) fn recreate_previews(
 
 pub(crate) fn rotate(
     input: Res<Input<KeyCode>>,
-    mut player_state: ResMut<PlayerState>,
+    mut gs: ResMut<GameState>,
     mut update_tiles: EventWriter<UpdateTiles>,
 ) {
     if input.just_pressed(KeyCode::R) {
-        if let Some(rotation) = player_state.selected_card.as_mut().map(|s| &mut s.rotation) {
+        if let Some(rotation) = gs.selected_card.as_mut().map(|s| &mut s.rotation) {
             *rotation = rotation.rotate_right();
             update_tiles.send(UpdateTiles);
         }
@@ -281,31 +295,34 @@ pub(crate) fn make_move(
     mouse: Res<Input<MouseButton>>,
     kb: Res<Input<KeyCode>>,
     cursor_coord: Res<CursorCoord>,
-    mut player_state: ResMut<PlayerState>,
-    board: Res<Board>,
+    mut gs: ResMut<GameState>,
     mut play_move: EventWriter<MoveMade>,
 ) {
-    if kb.just_pressed(KeyCode::P) {
-        player_state.selected_card = None;
-        play_move.send(MoveMade(Move::Pass(0)));
-    } else if let Some((card, coord)) = player_state.selected_card.as_ref().zip(cursor_coord.0) {
-        if mouse.just_pressed(MouseButton::Left) {
-            let rotation = card.rotation;
-            if is_placeable(
-                &board,
-                Player::P1,
-                &player_state.state.deck[card.card],
-                rotation,
-                coord,
-                false,
-            ) {
-                player_state.selected_card = None;
-                play_move.send(MoveMade(Move::Play {
-                    card_id: 0,
-                    pos: coord,
-                    rot: rotation,
-                    special: false,
-                }));
+    if !gs.game_over {
+        if kb.just_pressed(KeyCode::P) {
+            if let Some(selected) = gs.selected_card.clone() {
+                gs.selected_card = None;
+                play_move.send(MoveMade(Move::Pass(selected.card)));
+            }
+        } else if let Some((card, coord)) = gs.selected_card.as_ref().zip(cursor_coord.0) {
+            if mouse.just_pressed(MouseButton::Left) {
+                let rotation = card.rotation;
+                if is_placeable(
+                    &gs.board,
+                    Player::P1,
+                    &gs.player_state.deck[card.card],
+                    rotation,
+                    coord,
+                    false,
+                ) {
+                    gs.selected_card = None;
+                    play_move.send(MoveMade(Move::Play {
+                        card_id: 0,
+                        pos: coord,
+                        rot: rotation,
+                        special: false,
+                    }));
+                }
             }
         }
     }
@@ -313,15 +330,13 @@ pub(crate) fn make_move(
 
 pub(crate) fn execute_turn(
     mut player_move_event: EventReader<MoveMade>,
-    mut board: ResMut<Board>,
-    mut opponent: ResMut<Opponent>,
-    mut player: ResMut<PlayerState>,
     mut update_tiles: EventWriter<UpdateTiles>,
     mut create_previews: EventWriter<RecreatePreviewsEvent>,
-    mut turns_left: ResMut<TurnsLeft>,
+    mut gs: ResMut<GameState>, 
 ) {
     if let Some(MoveMade(player_move)) = player_move_event.read().cloned().next() {
-        let opponent_move = opponent.make_move(&board);
+        let gs = gs.as_mut();
+        let opponent_move = gs.opponent.make_move(&gs.board);
         let mut temporary_board = HashMap::new();
         // Keep track of the power of the player's card *if they played one*
         // for use when calculating who has priority
@@ -332,7 +347,7 @@ pub(crate) fn execute_turn(
             Move::Play {
                 card_id, pos, rot, ..
             } => {
-                let card = rotate_card(&player.state.deck[card_id], rot);
+                let card = rotate_card(&gs.player_state.deck[card_id], rot);
                 player_card_power = Some(card.len());
 
                 for (tile_pos, special) in card {
@@ -347,14 +362,14 @@ pub(crate) fn execute_turn(
             }
         }
 
-        player.state.make_move(&player_move);
+        gs.player_state.make_move(&player_move);
 
         match opponent_move {
             Move::Pass(_) => {}
             Move::Play {
                 card_id, pos, rot, ..
             } => {
-                let card = rotate_card(&opponent.deck()[card_id], rot);
+                let card = rotate_card(&gs.opponent.deck()[card_id], rot);
 
                 let priority = if let Some(power) = player_card_power {
                     if power > card.len() {
@@ -390,9 +405,35 @@ pub(crate) fn execute_turn(
             }
         }
 
-        board.board.extend(temporary_board);
+        gs.board.board.extend(temporary_board);
         update_tiles.send(UpdateTiles);
-        create_previews.send(RecreatePreviewsEvent);
-        turns_left.0 -= 1;
+        gs.turns_left -= 1;
+
+        if gs.turns_left == 0 {
+            gs.game_over = true;
+            // TODO send a game over event or something
+        } else {
+            create_previews.send(RecreatePreviewsEvent);
+        }
     }
 }
+
+pub(crate) fn restart_game(
+    mut cmd: Commands,
+    kb: Res<Input<KeyCode>>,
+    mut gs: ResMut<GameState>,
+    tiles: Query<Entity, With<Tile>>,
+    mut create_previews: EventWriter<RecreatePreviewsEvent>,
+) {
+    if gs.game_over && kb.just_pressed(KeyCode::R) {
+        let board = Board::new();
+        for t in tiles.iter() {
+            cmd.entity(t).despawn_recursive();
+        }
+        create_board(&mut cmd, &board);
+        *gs = GameState::new(board);
+
+        create_previews.send(RecreatePreviewsEvent);
+    }
+}
+

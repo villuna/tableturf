@@ -6,7 +6,6 @@ use crate::{
     game::{ActorState, Move},
     Player,
 };
-use bevy::prelude::*;
 use rand::{seq::SliceRandom, Rng};
 
 /// An AiOpponent implements some algorithm that calculates what the next turn is given the current
@@ -17,7 +16,6 @@ pub(crate) trait AIOpponent: Send + Sync {
     fn next_move(&mut self, board: &Board, state: &ActorState) -> Move;
 }
 
-#[derive(Resource)]
 pub(crate) struct Opponent {
     ai: Box<dyn AIOpponent>,
     state: ActorState,

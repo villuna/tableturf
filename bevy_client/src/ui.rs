@@ -1,5 +1,4 @@
-use crate::board::{Board, TileData};
-use crate::game::{MoveMade, TurnsLeft};
+use crate::{board::TileData, game::GameState};
 use bevy::prelude::*;
 
 use crate::{AssetCache, Player};
@@ -9,6 +8,9 @@ pub(crate) struct TurnCounterText;
 
 #[derive(Component)]
 pub(crate) struct TileCounterText(pub Player);
+
+#[derive(Component)]
+pub(crate) struct GameOverText;
 
 pub(crate) fn create_ui(mut cmd: Commands, assets: Res<AssetServer>) {
     let font = assets.load("FiraSans-Black.ttf");
@@ -79,11 +81,51 @@ pub(crate) fn create_ui(mut cmd: Commands, assets: Res<AssetServer>) {
             ..default()
         },
     ));
+
+    cmd.spawn((
+        GameOverText,
+        Text2dBundle {
+            text: Text::from_section(
+                "GAME OVER!",
+                TextStyle {
+                    font: font.clone(),
+                    font_size: 80.,
+                    color: Color::rgb(1.0, 0.4, 0.3),
+                }
+            ),
+            transform: Transform::from_translation(Vec3::new(0., 300., 1.)),
+            visibility: Visibility::Hidden,
+            ..default()
+        }
+    )).with_children(|parent| {
+        parent.spawn(Text2dBundle {
+            text: Text::from_section(
+                "Press R to restart",
+                TextStyle {
+                    font: font.clone(),
+                    font_size: 60.,
+                    color: Color::rgb(0.9, 0.9, 0.9),
+                }
+            ),
+            transform: Transform::from_translation(Vec3::new(0., -100., 1.)),
+            ..default()
+        });
+
+        parent.spawn(SpriteBundle {
+            sprite: Sprite {
+                color: Color::rgba(0.05, 0.05, 0.05, 0.8),
+                custom_size: Some(Vec2::new(500., 300.,)),
+                ..default()
+            },
+            transform: Transform::from_translation(Vec3::new(0., -50., 0.)),
+            ..default()
+        });
+    });
 }
 
 pub(crate) fn update_turn_text(
     assets: Res<AssetCache>,
-    turns: Res<TurnsLeft>,
+    gs: Res<GameState>,
     mut text: Query<&mut Text, With<TurnCounterText>>,
 ) {
     let mut text = text.single_mut();
@@ -93,16 +135,17 @@ pub(crate) fn update_turn_text(
         color: Color::WHITE,
     };
 
-    *text = Text::from_section(format!("{}", turns.0), style);
+    *text = Text::from_section(format!("{}", gs.turns_left), style);
 }
 
 pub(crate) fn update_tile_text(
     assets: Res<AssetCache>,
-    board: Res<Board>,
+    gs: Res<GameState>,
     mut text: Query<(&mut Text, &TileCounterText)>,
 ) {
     for (mut text, &TileCounterText(player)) in text.iter_mut() {
-        let count = board
+        let count = gs
+            .board
             .board
             .values()
             .filter(
@@ -122,5 +165,17 @@ pub(crate) fn update_tile_text(
                 .colour(),
             },
         )
+    }
+}
+
+pub(crate) fn show_game_over(
+    mut text: Query<&mut Visibility, With<GameOverText>>,
+    gs: Res<GameState>,
+) {
+    let mut visibility = text.single_mut();
+    if gs.game_over {
+        *visibility = Visibility::Visible
+    } else {
+        *visibility = Visibility::Hidden
     }
 }
