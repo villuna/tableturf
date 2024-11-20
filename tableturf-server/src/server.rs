@@ -1,15 +1,19 @@
-use std::{
-    collections::HashSet,
-    net::SocketAddr,
-    sync::{Arc, Mutex},
-};
+use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
-use color_eyre::eyre::Context;
+use color_eyre::eyre::{eyre, Context};
 use futures::{SinkExt, StreamExt};
-use tableturf::protocol::{ClientMessage, ServerMessage};
-use tokio::net::{TcpListener, TcpStream};
+use tableturf::protocol::{ClientMessage, PublicPlayerInfo, ServerMessage, PlayerId};
+use tokio::{
+    net::{TcpListener, TcpStream},
+    sync::{
+        mpsc::{unbounded_channel, UnboundedSender},
+        Mutex,
+    },
+};
 use tokio_util::codec::{Framed, LinesCodec};
 use tracing::{error, info, instrument, warn};
+
+use crate::game::{handle_game, GameEvent};
 
 /// Struct that wraps a connection to a client and handles transforming messages to/from json
 pub struct ClientConnection {
@@ -46,17 +50,32 @@ impl ClientConnection {
     }
 }
 
+pub type ClientId = SocketAddr;
+
+#[derive(Clone, Debug)]
+pub struct ClientGameInfo {
+    pub player_id: PlayerId,
+    pub opponent: ClientId,
+    pub game_tx: UnboundedSender<(PlayerId, GameEvent)>
+}
+
+#[derive(Clone, Debug)]
+pub enum ServerEvent {
+    MatchFound(ClientGameInfo),
+}
+
 /// The global state for the server, to be shared among all client connections.
 ///
 /// Important: To avoid deadlocks, when acquiring multiple of these mutexes at the same time,
 /// always lock in the order that they are defined here. If you always lock with a consistent
 /// order, there will be no deadlocks.
 #[derive(Debug, Default)]
-struct SharedState {
+pub struct SharedState {
     // TODO: replace this with some more sophisticated matchmaking
     /// The current client thread that is waiting for matchmaking
-    players: Mutex<HashSet<SocketAddr>>,
-    hotseat: Mutex<Option<SocketAddr>>,
+    pub players: Mutex<HashMap<ClientId, PublicPlayerInfo>>,
+    pub channels: Mutex<HashMap<ClientId, UnboundedSender<ServerEvent>>>,
+    pub hotseat: Mutex<Option<ClientId>>,
 }
 
 impl SharedState {
@@ -65,11 +84,13 @@ impl SharedState {
     }
 
     // Handles a player disconnect by removing any of their data from the global state.
-    async fn remove_connection(&self, addr: SocketAddr) {
-        let mut players = self.players.lock().unwrap();
-        let mut hotseat = self.hotseat.lock().unwrap();
+    async fn remove_connection(&self, addr: ClientId) {
+        let mut players = self.players.lock().await;
+        let mut channels = self.channels.lock().await;
+        let mut hotseat = self.hotseat.lock().await;
 
         players.remove(&addr);
+        channels.remove(&addr);
         hotseat.take_if(|a| *a == addr);
     }
 }
@@ -119,10 +140,11 @@ pub async fn run(address: &str) -> color_eyre::Result<()> {
     Ok(())
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 enum ClientState {
     InLobby,
     Matchmaking,
+    InGame(ClientGameInfo),
 }
 
 /// Async task which handles a client connection.
@@ -143,33 +165,69 @@ async fn handle_client(
     connection.send(&ServerMessage::HelloClient).await?;
     info!("Player {:?} has joined the lobby", info.name);
 
-    shared_state.players.lock().unwrap().insert(addr);
+    let (tx, mut rx) = unbounded_channel();
 
-    while let Some(msg) = connection.next().await? {
-        info!("Client {:?} sent message: {msg:?}", info.name);
+    shared_state.players.lock().await.insert(addr, info.clone());
+    shared_state.channels.lock().await.insert(addr, tx);
 
-        match msg {
-            ClientMessage::FindGame if state == ClientState::InLobby => {
-                let mut hotseat = shared_state.hotseat.lock().unwrap();
+    // Continually poll for either messages from the client or events from other parts of the
+    // server.
+    loop {
+        tokio::select! {
+            // If the client has sent us a new message
+            msg = connection.next() => {
+                let Some(msg) = msg? else {
+                    // Client has closed the connection
+                    break;
+                };
 
-                match *hotseat {
-                    None => {
-                        info!("Nobody is on the hotseat, so I'm siting down");
-                        *hotseat = Some(addr);
+                info!("Client {:?} sent message: {msg:?}", info.name);
+
+                match msg {
+                    ClientMessage::FindGame if matches!(state, ClientState::InLobby) => {
                         state = ClientState::Matchmaking;
+                        let mut hotseat = shared_state.hotseat.lock().await;
+
+                        match *hotseat {
+                            None => {
+                                info!("Nobody is on the hotseat, so I'm siting down");
+                                *hotseat = Some(addr);
+                            }
+                            Some(opp) => {
+                                *hotseat = None;
+                                drop(hotseat);
+
+                                // Create a new task to handle the new game. It'll inform both
+                                // client tasks that the game has started, and go from there.
+                                tokio::spawn(handle_game(Arc::clone(&shared_state), [addr, opp]));
+                            }
+                        }
                     }
-                    Some(opp) => {
-                        *hotseat = None;
-                        info!("Starting game match with opponent {opp:?}");
-                        // TODO: start the game
+
+                    _ => {
+                        // When the client breaks protocol, we will ignore it to allow things like sending
+                        // the same message twice. But log it just to be sure.
+                        warn!("Client sent message that doesn't align with protocol ({msg:?}).");
                     }
                 }
-            }
-            _ => {
-                // When the client breaks protocol, we will ignore it to allow things like sending
-                // the same message twice. But log it just to be sure.
-                warn!("Client sent message that doesn't align with protocol ({msg:?}).");
-            }
+            },
+
+            // If there is a new internal server event
+            Some(ev) = rx.recv() => {
+                match ev {
+                    ServerEvent::MatchFound(info) => {
+                        if !matches!(state, ClientState::Matchmaking) {
+                            // This is a hard error because it's an internal logic error that we really
+                            // can't come back from
+                            return Err(eyre!("Client task sent MatchFound event despite not being in matchmaking"));
+                        }
+
+                        let opp_info = shared_state.players.lock().await.get(&info.opponent).unwrap().clone();
+                        connection.send(&ServerMessage::MatchFound { opp_info , player_id: info.player_id }).await?;
+                        state = ClientState::InGame(info);
+                    },
+                }
+            },
         }
     }
 

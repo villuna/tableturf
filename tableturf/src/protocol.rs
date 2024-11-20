@@ -1,9 +1,21 @@
 use serde::{Deserialize, Serialize};
+use serde_repr::{Deserialize_repr, Serialize_repr};
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize_repr, Deserialize_repr)]
+#[repr(u8)]
+pub enum PlayerId {
+    P1 = 0,
+    P2 = 1,
+}
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMessage {
     HelloClient,
+    MatchFound {
+        opp_info: PublicPlayerInfo,
+        player_id: PlayerId,
+    },
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
