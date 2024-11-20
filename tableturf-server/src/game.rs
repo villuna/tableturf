@@ -47,5 +47,8 @@ pub async fn handle_game(shared_state: Arc<SharedState>, players: [ClientId; 2])
 
     info!("Game handler closing down");
 
+    let _ = tx1.send(ServerEvent::GameEnded);
+    let _ = tx2.send(ServerEvent::GameEnded);
+
     Ok(())
 }

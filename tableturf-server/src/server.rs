@@ -61,7 +61,10 @@ pub struct ClientGameInfo {
 
 #[derive(Clone, Debug)]
 pub enum ServerEvent {
+    /// Signals to a matchmaking client that it has found a game.
     MatchFound(ClientGameInfo),
+    /// Signals to an in-game client that the game is over and it shoudld return to the lobby.
+    GameEnded,
 }
 
 /// The global state for the server, to be shared among all client connections.
@@ -215,17 +218,19 @@ async fn handle_client(
             // If there is a new internal server event
             Some(ev) = rx.recv() => {
                 match ev {
-                    ServerEvent::MatchFound(info) => {
-                        if !matches!(state, ClientState::Matchmaking) {
-                            // This is a hard error because it's an internal logic error that we really
-                            // can't come back from
-                            return Err(eyre!("Client task sent MatchFound event despite not being in matchmaking"));
-                        }
-
+                    ServerEvent::MatchFound(info) if matches!(state, ClientState::Matchmaking) => {
                         let opp_info = shared_state.players.lock().await.get(&info.opponent).unwrap().clone();
                         connection.send(&ServerMessage::MatchFound { opp_info , player_id: info.player_id }).await?;
                         state = ClientState::InGame(info);
                     },
+                    ServerEvent::GameEnded if matches!(state, ClientState::InGame { .. }) => {
+                        info!("It appears the opponent has left the game");
+                        state = ClientState::InLobby;
+                        // TODO: send game over message to client
+                    },
+                    _ => {
+                        return Err(eyre!("Client task got unexpected event {ev:?} in state {state:?}"));
+                    }
                 }
             },
         }
