@@ -2,7 +2,7 @@ use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
 use color_eyre::eyre::{eyre, Context};
 use futures::{SinkExt, StreamExt};
-use tableturf::protocol::{ClientMessage, PublicPlayerInfo, ServerMessage, PlayerId};
+use tableturf::protocol::{ClientMessage, PublicPlayerInfo, ServerMessage};
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::{
@@ -16,22 +16,23 @@ use tracing::{error, info, instrument, warn};
 use crate::game::{handle_game, GameEvent};
 
 /// Struct that wraps a connection to a client and handles transforming messages to/from json
+#[derive(Debug)]
 pub struct ClientConnection {
-    inner: Framed<TcpStream, LinesCodec>,
+    inner: Mutex<Framed<TcpStream, LinesCodec>>,
 }
 
 impl ClientConnection {
     /// Create a new client connection.
     pub fn new(socket: TcpStream) -> Self {
         Self {
-            inner: Framed::new(socket, LinesCodec::new()),
+            inner: Mutex::new(Framed::new(socket, LinesCodec::new())),
         }
     }
 
     /// Recieve a message from the connected client. If the client disconnected, this will return
     /// Ok(None). If there was some unexpected error, will return an Err variant.
-    pub async fn next(&mut self) -> color_eyre::Result<Option<ClientMessage>> {
-        let line = self.inner.next().await;
+    pub async fn next(&self) -> color_eyre::Result<Option<ClientMessage>> {
+        let line = self.inner.lock().await.next().await;
 
         match line {
             None => Ok(None),
@@ -44,28 +45,13 @@ impl ClientConnection {
     }
 
     /// Send a server message to the client, encoded as JSON and line terminated.
-    pub async fn send(&mut self, msg: &ServerMessage) -> color_eyre::Result<()> {
-        self.inner.send(&serde_json::to_string(msg)?).await?;
+    pub async fn send(&self, msg: &ServerMessage) -> color_eyre::Result<()> {
+        self.inner.lock().await.send(&serde_json::to_string(msg)?).await?;
         Ok(())
     }
 }
 
 pub type ClientId = SocketAddr;
-
-#[derive(Clone, Debug)]
-pub struct ClientGameInfo {
-    pub player_id: PlayerId,
-    pub opponent: ClientId,
-    pub game_tx: UnboundedSender<(PlayerId, GameEvent)>
-}
-
-#[derive(Clone, Debug)]
-pub enum ServerEvent {
-    /// Signals to a matchmaking client that it has found a game.
-    MatchFound(ClientGameInfo),
-    /// Signals to an in-game client that the game is over and it shoudld return to the lobby.
-    GameEnded,
-}
 
 /// The global state for the server, to be shared among all client connections.
 ///
@@ -77,7 +63,7 @@ pub struct SharedState {
     // TODO: replace this with some more sophisticated matchmaking
     /// The current client thread that is waiting for matchmaking
     pub players: Mutex<HashMap<ClientId, PublicPlayerInfo>>,
-    pub channels: Mutex<HashMap<ClientId, UnboundedSender<ServerEvent>>>,
+    pub channels: Mutex<HashMap<ClientId, UnboundedSender<GameEvent>>>,
     pub hotseat: Mutex<Option<ClientId>>,
 }
 
@@ -147,17 +133,17 @@ pub async fn run(address: &str) -> color_eyre::Result<()> {
 enum ClientState {
     InLobby,
     Matchmaking,
-    InGame(ClientGameInfo),
 }
 
 /// Async task which handles a client connection.
 #[instrument(skip(connection, shared_state))]
 async fn handle_client(
-    mut connection: ClientConnection,
+    connection: ClientConnection,
     addr: SocketAddr,
     shared_state: Arc<SharedState>,
 ) -> color_eyre::Result<()> {
     let mut state = ClientState::InLobby;
+    let connection = Arc::new(connection);
 
     // Get the player info
     let Some(ClientMessage::HelloServer { info }) = connection.next().await? else {
@@ -186,8 +172,8 @@ async fn handle_client(
 
                 info!("Client {:?} sent message: {msg:?}", info.name);
 
-                match msg {
-                    ClientMessage::FindGame if matches!(state, ClientState::InLobby) => {
+                match (&msg, &state) {
+                    (ClientMessage::FindGame, ClientState::InLobby) => {
                         state = ClientState::Matchmaking;
                         let mut hotseat = shared_state.hotseat.lock().await;
 
@@ -215,18 +201,32 @@ async fn handle_client(
                 }
             },
 
-            // If there is a new internal server event
             Some(ev) = rx.recv() => {
                 match ev {
-                    ServerEvent::MatchFound(info) if matches!(state, ClientState::Matchmaking) => {
-                        let opp_info = shared_state.players.lock().await.get(&info.opponent).unwrap().clone();
-                        connection.send(&ServerMessage::MatchFound { opp_info , player_id: info.player_id }).await?;
-                        state = ClientState::InGame(info);
-                    },
-                    ServerEvent::GameEnded if matches!(state, ClientState::InGame { .. }) => {
-                        info!("It appears the opponent has left the game");
-                        state = ClientState::InLobby;
-                        // TODO: send game over message to client
+                    GameEvent::MatchFound(tx) if matches!(state, ClientState::Matchmaking) => {
+                        if tx.send(Arc::clone(&connection)).is_err() {
+                            error!("Couldn't send connection over to the game handler!");
+                            state = ClientState::InLobby;
+                            // TODO tell client that it is game over, in the unlikely event that
+                            // this happens
+                        } else {
+                            info!("Game has started, relinquishing connection to handler thread.");
+                            info!("Now waiting for a game over event...");
+
+                            match rx.recv().await {
+                                Some(GameEvent::GameEnded) => {},
+                                Some(e) => {
+                                    // A hard error since this would be a wildly invalid state
+                                    return Err(eyre!("Expected a GameEnded event, got something different ({e:?})"));
+                                }
+                                None => {
+                                    error!("Game channel closed unexpectedly");
+                                }
+                            }
+
+                            info!("Game has ended, returning to lobby.");
+                            state = ClientState::InLobby;
+                        }
                     },
                     _ => {
                         return Err(eyre!("Client task got unexpected event {ev:?} in state {state:?}"));
