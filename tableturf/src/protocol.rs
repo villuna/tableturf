@@ -16,6 +16,9 @@ pub enum ServerMessage {
         opp_info: PublicPlayerInfo,
         player_id: PlayerId,
     },
+    StartWithTimeout {
+        timeout: u32,
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
@@ -28,6 +31,7 @@ pub struct PublicPlayerInfo {
 pub enum ClientMessage {
     HelloServer { info: PublicPlayerInfo },
     FindGame,
+    Ready,
 }
 
 #[cfg(test)]
