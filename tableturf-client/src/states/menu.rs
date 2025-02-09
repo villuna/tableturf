@@ -3,6 +3,7 @@ use raylib::{prelude::RaylibDraw, RaylibHandle};
 use raylib::color::Color;
 
 use crate::client::GameContext;
+use crate::ui::colours::DARKGRAY;
 use crate::ui::Button;
 use crate::{GameState, StateTransition};
 
@@ -49,7 +50,7 @@ impl GameState for MainMenu {
 
     fn draw(&mut self, d: &mut RaylibDrawHandle, _ctx: &mut GameContext) {
         d.clear_background(Color::RAYWHITE);
-        d.draw_text(TITLE, self.title_x, 100, TITLE_FONT_SIZE, crate::ui::DARKGRAY);
+        d.draw_text(TITLE, self.title_x, 100, TITLE_FONT_SIZE, DARKGRAY);
 
         self.button_single.draw(d);
         self.button_multi.draw(d);

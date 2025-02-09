@@ -48,34 +48,35 @@ impl Connection {
     }
 }
 
+/// An interface that handles the connection with the game server
+///
+/// The rest of the game will use this to check if there is a connection and send/recieve messages
+/// to and from the server.
 pub struct GameContext {
-    online: bool,
     connection: Option<Connection>,
 }
 
 impl GameContext {
+    /// Creates a new GameContext, but does not try to connect to anything.
     pub fn new() -> Self {
         Self {
-            online: false,
             connection: None,
         }
     }
 
+    /// Returns whether the server is connected, i.e. a connection has been made.
     pub fn connected(&self) -> bool {
         self.connection.is_some()
     }
 
-    pub fn online(&self) -> bool {
-        self.online
-    }
-
+    /// Attempts to connect to the server if it is not already connected
     pub fn connect(&mut self, address: impl ToSocketAddrs) {
-        if !self.online {
-            self.online = true;
+        if self.connection.is_none() {
             self.connection = Connection::new(address).ok();
         }
     }
 
+    /// Disconnects from the server if connected
     pub fn disconnect(&mut self) {
         if let Some(connection) = self.connection.take() {
             let _ = connection.connection.shutdown(std::net::Shutdown::Both);
@@ -83,7 +84,8 @@ impl GameContext {
         }
     }
 
-    pub fn send(&mut self, msg: &ClientMessage) -> color_eyre::Result<()> {
+    // Helper function for send
+    fn try_send(&mut self, msg: &ClientMessage) -> color_eyre::Result<()> {
         if let Some(connection) = &mut self.connection {
             connection
                 .connection
@@ -95,6 +97,18 @@ impl GameContext {
         Ok(())
     }
 
+    /// Attempts to send a message to the server. If it encounters an error, it will disconnect.
+    pub fn send(&mut self, msg: &ClientMessage) -> color_eyre::Result<()> {
+        let result = self.try_send(msg); 
+
+        if result.is_err() {
+            self.disconnect();
+        }
+
+        result
+    }
+
+    /// Polls the connection and returns a new message if one has been recieved.
     pub fn recv(&mut self) -> Option<ServerMessage> {
         self.connection.as_mut().and_then(|c| c.rx.try_recv().ok())
     }
