@@ -12,6 +12,7 @@ pub enum PlayerId {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMessage {
     HelloClient,
+    WaitForOpponent,
     MatchFound {
         opp_info: PublicPlayerInfo,
         player_id: PlayerId,

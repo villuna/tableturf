@@ -73,14 +73,20 @@ impl SharedState {
     }
 
     // Handles a player disconnect by removing any of their data from the global state.
+    #[instrument(skip(self))]
     async fn remove_connection(&self, addr: ClientId) {
+        info!("Removing disconnected client");
         let mut players = self.players.lock().await;
         let mut channels = self.channels.lock().await;
         let mut hotseat = self.hotseat.lock().await;
 
         players.remove(&addr);
         channels.remove(&addr);
-        hotseat.take_if(|a| *a == addr);
+
+        if hotseat.is_some_and(|a| a == addr) {
+            hotseat.take();
+            info!("Client was on the hotseat, now it is free");
+        }
     }
 }
 
