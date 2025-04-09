@@ -3,7 +3,7 @@
 use raylib::{color::Color, prelude::{RaylibDraw, RaylibDrawHandle}, RaylibHandle};
 use tableturf::protocol::ServerMessage;
 
-use crate::{client::GameContext, GameState, StateTransition};
+use crate::{client::GameContext, states::error_message::ErrorMessage, GameState, StateTransition};
 
 enum State {
     InLobby,
@@ -23,10 +23,10 @@ impl MatchLobby {
 }
 
 impl GameState for MatchLobby {
-    fn update(&mut self, _rl: &mut RaylibHandle, _ctx: &mut GameContext) -> StateTransition {
+    fn update(&mut self, rl: &mut RaylibHandle, _ctx: &mut GameContext) -> StateTransition {
         match self.state {
             State::InLobby => StateTransition::None,
-            State::OpponentDisconnected => StateTransition::Pop,
+            State::OpponentDisconnected => StateTransition::Swap(Box::new(ErrorMessage::new(rl, "Communication error: opponent disconnected"))),
         }
     }
     fn draw(&mut self, d: &mut RaylibDrawHandle, _ctx: &mut GameContext) {

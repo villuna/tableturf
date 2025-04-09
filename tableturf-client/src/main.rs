@@ -1,32 +1,11 @@
 use client::GameContext;
 use color_eyre::eyre::OptionExt;
 use raylib::prelude::*;
-use states::MainMenu;
-use tableturf::protocol::ServerMessage;
+use states::{GameState, MainMenu, StateTransition};
 
 mod client;
 mod states;
 mod ui;
-
-enum StateTransition {
-    None,
-    Pop,
-    Push(Box<dyn GameState>),
-    Swap(Box<dyn GameState>),
-    Exit,
-}
-
-trait GameState {
-    fn update(&mut self, _rl: &mut RaylibHandle, _ctx: &mut GameContext) -> StateTransition {
-        StateTransition::None
-    }
-    
-    fn draw(&mut self, d: &mut RaylibDrawHandle, _ctx: &mut GameContext) {
-        d.clear_background(Color::RAYWHITE);
-    }
-
-    fn server_msg(&mut self, _msg: ServerMessage, _rl: &mut RaylibHandle, _ctx: &mut GameContext) {}
-}
 
 fn main() -> color_eyre::Result<()> {
     color_eyre::install()?;

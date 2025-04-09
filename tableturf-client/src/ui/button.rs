@@ -4,7 +4,6 @@ use crate::ui::colours::*;
 const BUTTON_VPADDING: i32 = 7;
 const BUTTON_HPADDING: i32 = 15;
 
-
 pub struct Button {
     pub x: i32,
     pub y: i32,
