@@ -46,7 +46,11 @@ impl ClientConnection {
 
     /// Send a server message to the client, encoded as JSON and line terminated.
     pub async fn send(&self, msg: &ServerMessage) -> color_eyre::Result<()> {
-        self.inner.lock().await.send(&serde_json::to_string(msg)?).await?;
+        self.inner
+            .lock()
+            .await
+            .send(&serde_json::to_string(msg)?)
+            .await?;
         Ok(())
     }
 }
@@ -187,6 +191,7 @@ async fn handle_client(
                             None => {
                                 info!("Nobody is on the hotseat, so I'm siting down");
                                 *hotseat = Some(addr);
+                                connection.send(&ServerMessage::WaitForOpponent).await?;
                             }
                             Some(opp) => {
                                 *hotseat = None;

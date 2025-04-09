@@ -1,3 +1,4 @@
+use crate::cards::Deck;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
@@ -12,14 +13,19 @@ pub enum PlayerId {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMessage {
     HelloClient,
+    /// Response to [`ClientMessage::Pong`]
+    Pong { number: usize },
     WaitForOpponent,
     MatchFound {
         opp_info: PublicPlayerInfo,
         player_id: PlayerId,
     },
+    /// Sent to a client if their opponent disconnects midgame. Depending on the stage of the game
+    /// this might count as a win or a draw.
+    OpponentDisconnected,
     StartWithTimeout {
         timeout: u32,
-    }
+    },
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
@@ -31,8 +37,15 @@ pub struct PublicPlayerInfo {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientMessage {
     HelloServer { info: PublicPlayerInfo },
+    /// Sent to the server every now and then to check if the server is still alive
+    /// A client disconnect is detectable by the server but a server crash is undetectable by the
+    /// client, hence why this is necessary.
+    /// The number is randomised and we expect the server to respond with the same number so we
+    /// know that e.g. we are not getting a response meant for a different user.
+    Ping { number: usize },
     FindGame,
     Ready,
+    ChosenDeck { deck: Deck },
 }
 
 #[cfg(test)]

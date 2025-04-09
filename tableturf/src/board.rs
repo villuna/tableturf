@@ -18,7 +18,7 @@ pub enum Rotation {
     Left = 3,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Tile {
     Empty,
     Wall,

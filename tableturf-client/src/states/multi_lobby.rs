@@ -3,11 +3,14 @@ use tableturf::protocol::{ClientMessage, ServerMessage};
 
 use crate::{client::GameContext, ui::Button, GameState, StateTransition};
 
+use super::mp_match::match_lobby::MatchLobby;
+
 #[derive(Copy, Clone, PartialEq, Eq)]
 enum State {
     InLobby,
     WaitingForServer,
     Matchmaking,
+    MatchFound,
 }
 
 pub struct MultiplayerLobby {
@@ -29,13 +32,23 @@ impl MultiplayerLobby {
 
 impl GameState for MultiplayerLobby {
     fn update(&mut self, rl: &mut RaylibHandle, ctx: &mut GameContext) -> StateTransition {
-        if matches!(self.state, State::InLobby) && self.find_game_button.is_clicked(rl) {
-            if ctx.send(&ClientMessage::FindGame).is_err() {
-                return StateTransition::Pop;
-            }
+        match self.state {
+            State::InLobby => {
+                if self.find_game_button.is_clicked(rl) {
+                    if ctx.send(&ClientMessage::FindGame).is_err() {
+                        return StateTransition::Pop;
+                    }
 
-            self.state = State::WaitingForServer;
-        }
+                    self.state = State::WaitingForServer;
+                }
+            },
+
+            State::MatchFound => {
+                return StateTransition::Swap(Box::new(MatchLobby::new()));
+            },
+
+            _ => {},
+        };
 
         if self.back_button.is_clicked(rl) {
             ctx.disconnect();
@@ -53,6 +66,7 @@ impl GameState for MultiplayerLobby {
             State::WaitingForServer => d.draw_text("please wait...", 100, 100, 50, Color::RED),
             State::Matchmaking => d.draw_text("Matchmaking...", 100, 100, 50, Color::DARKBLUE),
             State::InLobby => self.find_game_button.draw(d),
+            State::MatchFound => {},
         }
     }
 
@@ -62,11 +76,12 @@ impl GameState for MultiplayerLobby {
                 self.state = State::Matchmaking;
             }
             ServerMessage::MatchFound { opp_info, .. }
-                if matches!(self.state, State::Matchmaking) =>
+                if matches!(self.state, State::Matchmaking | State::WaitingForServer) =>
             {
-                println!("Found game with player: {opp_info:?}")
+                println!("Found game with player: {opp_info:?}");
+                self.state = State::MatchFound;
             }
-            _ => panic!("Recieved unexpected message"),
+            _ => panic!("Recieved unexpected message: {msg:?}"),
         }
     }
 }

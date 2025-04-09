@@ -57,17 +57,25 @@ async fn handle_game_inner(
         (infos.get(&players[0]).unwrap().clone(), infos.get(&players[1]).unwrap().clone())
     };
 
-    connection1.send(&ServerMessage::MatchFound { opp_info: info2, player_id: PlayerId::P1 }).await?;
-    connection2.send(&ServerMessage::MatchFound { opp_info: info1, player_id: PlayerId::P2 }).await?;
+    connection1.send(&ServerMessage::MatchFound { opp_info: info2.clone(), player_id: PlayerId::P1 }).await?;
+    connection2.send(&ServerMessage::MatchFound { opp_info: info1.clone(), player_id: PlayerId::P2 }).await?;
 
     loop {
         tokio::select! {
             msg = connection1.next() => {
-                let Some(msg) = msg? else { break; };
+                let Some(msg) = msg? else { 
+                    info!("P1 \"{}\" disconnected unexpectedly", info1.name);
+                    connection2.send(&ServerMessage::OpponentDisconnected).await?;
+                    break;
+                };
                 info!("P1 sent event {msg:?}");
             },
             msg = connection2.next() => {
-                let Some(msg) = msg? else { break; };
+                let Some(msg) = msg? else { 
+                    info!("P2 \"{}\" disconnected unexpectedly", info2.name);
+                    connection1.send(&ServerMessage::OpponentDisconnected).await?;
+                    break;
+                };
                 info!("P2 sent event {msg:?}");
             },
         }
