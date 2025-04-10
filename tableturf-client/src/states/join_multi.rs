@@ -7,8 +7,8 @@ use super::multi_lobby::MultiplayerLobby;
 
 enum State {
     InLobby,
-    WaitingForServer,
-    Joined,
+    WaitingForServer(PublicPlayerInfo),
+    Joined(PublicPlayerInfo),
 }
 
 pub struct JoinMultiplayer {
@@ -37,23 +37,23 @@ impl GameState for JoinMultiplayer {
     fn update(&mut self, rl: &mut RaylibHandle, ctx: &mut GameContext) -> StateTransition {
         self.name_box.update(rl);
 
-        match self.state {
+        match &mut self.state {
             State::InLobby => {
                 if self.button_join.is_clicked(rl) || rl.is_key_pressed(KeyboardKey::KEY_ENTER) {
                     let name = self.name_box.take();
 
                     if name.len() > 0 {
-                        ctx.send(&ClientMessage::HelloServer { info: PublicPlayerInfo { name } }).unwrap();
-                        self.state = State::WaitingForServer;
+                        ctx.send(&ClientMessage::HelloServer { info: PublicPlayerInfo { name: name.clone() } }).unwrap();
+                        self.state = State::WaitingForServer(PublicPlayerInfo { name });
                     }
                 }
             }
 
-            State::Joined => {
-                return StateTransition::Swap(Box::new(MultiplayerLobby::new(rl)));
+            State::Joined(info) => {
+                return StateTransition::Swap(Box::new(MultiplayerLobby::new(rl, std::mem::take(info))));
             }
 
-            State::WaitingForServer => {}
+            State::WaitingForServer(..) => {}
         }
 
         if self.button_exit.is_clicked(rl) {
@@ -70,7 +70,7 @@ impl GameState for JoinMultiplayer {
         if !ctx.connected() {
             d.draw_text("Not connected!!", 100, 100, 40, Color::RED);
         } else {
-            if matches!(self.state, State::WaitingForServer) {
+            if matches!(self.state, State::WaitingForServer(..)) {
                 d.draw_text("Please wait...", 100, 100, 40, Color::DARKBLUE);
             } else {
                 d.draw_text("Connected!", 100, 100, 40, Color::BLUEVIOLET);
@@ -85,8 +85,10 @@ impl GameState for JoinMultiplayer {
 
     fn server_msg(&mut self, msg: ServerMessage, _rl: &mut RaylibHandle, _ctx: &mut GameContext) {
         match msg {
-            ServerMessage::HelloClient if matches!(self.state, State::WaitingForServer) => {
-                self.state = State::Joined;
+            ServerMessage::HelloClient => {
+                if let State::WaitingForServer(info) = &mut self.state {
+                    self.state = State::Joined(std::mem::take(info));
+                }
             }
             _ => panic!("Unexpected server message"),
         }

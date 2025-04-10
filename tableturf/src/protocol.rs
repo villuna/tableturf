@@ -28,7 +28,7 @@ pub enum ServerMessage {
     },
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, Default)]
 pub struct PublicPlayerInfo {
     pub name: String,
 }
